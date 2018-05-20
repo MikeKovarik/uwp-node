@@ -34,9 +34,11 @@ namespace UwpNode {
         public void OnBackgroundActivated(BackgroundActivatedEventArgs args) {
             //CoreApplication.MainView.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () => await (new MessageDialog("OnBackgroundActivated")).ShowAsync()); // TODO: delete
             if (args.TaskInstance.TriggerDetails is AppServiceTriggerDetails details) {
-                // Get task's deferal to enable the Canceled event.
+                // Get task's deferal to enable the Canceled event and prevent immediate termination.
                 taskInstanceDeferral = args.TaskInstance.GetDeferral();
+				// Listen for termination of background task.
                 args.TaskInstance.Canceled += OnTaskCanceled;
+				// Publish the app service of background task.
                 connection = details.AppServiceConnection;
                 connect?.Invoke(null, connection);
             }

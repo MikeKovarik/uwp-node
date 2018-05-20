@@ -13,10 +13,10 @@ namespace BackgroundProcess {
         List<NamedPipeServerStream> pipes = new List<NamedPipeServerStream>();
         List<NamedPipeServerStream> connections = new List<NamedPipeServerStream>();
 
-        public event EventHandler<Object> data;
-        public event EventHandler<Object> connection;
-        public event EventHandler<Object> end;
-        public event EventHandler<Object> error;
+        public event Action<byte[]> data;
+        public event Action connection;
+        public event Action end;
+        public event Action<string> error;
 
         string name;
         int chunksize = 665536;
@@ -47,7 +47,7 @@ namespace BackgroundProcess {
             // Client connected to this server.
             connections.Add(pipe);
             // Fire connection event.
-            connection?.Invoke(this, null);
+            connection?.Invoke();
             // Start another parallel stream server if needed.
             if (maxInstances > pipes.Count)
                 Create();
@@ -70,7 +70,7 @@ namespace BackgroundProcess {
                     }
                     byte[] trimmed = new byte[bytesRead];
                     Array.Copy(buffer, trimmed, bytesRead);
-                    data?.Invoke(this, trimmed);
+                    data?.Invoke(trimmed);
                     //MemoryStream trimmed = new MemoryStream();
                     //trimmed.Write(buffer, 0, bytesRead);
                 }
@@ -81,12 +81,12 @@ namespace BackgroundProcess {
 
         private void OnDisconnect(NamedPipeServerStream pipe) {
             ClosePipe(pipe);
-            end?.Invoke(this, null);
+            end?.Invoke();
         }
 
         private void OnError(NamedPipeServerStream pipe, Exception err) {
             ClosePipe(pipe);
-            error?.Invoke(this, err.ToString());
+            error?.Invoke(err.ToString());
         }
 
         private void ClosePipe(NamedPipeServerStream pipe) {

@@ -11,6 +11,19 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Diagnostics;
+using System;
+using System.Threading.Tasks;
+using Windows.ApplicationModel.Activation;
+using Windows.ApplicationModel.AppService;
+using Windows.ApplicationModel.Background;
+using Windows.ApplicationModel.Core;
+using Windows.Foundation;
+using Windows.Foundation.Collections;
+using Windows.Foundation.Metadata;
+using Windows.UI.Core;
+using Windows.UI.Popups;
+using System.Management;
+
 
 // Package.Current.DisplayName
 // Package.Current.Id.FamilyName
@@ -19,38 +32,62 @@ using System.Diagnostics;
 namespace BackgroundProcess {
 
     class IPC {
-        // TODO: handle when the apps reopens but not by this process.
-        //       the app would then go on to create new background process, rather than reconnecting to this one.
-        // TODO: do not pass stdio/pipe related messages down to pipes
+		// TODO: handle when the apps reopens but not by this process.
+		//       the app would then go on to create new background process, rather than reconnecting to this one.
+		// TODO: do not pass stdio/pipe related messages down to pipes
 
-        static public AppServiceConnection uwpAppConn = null;
-        static public AppServiceConnection connection = null; // todo delete
-        static public NamedPipe childInternalIpcPipe = null;
-        static string serviceName = "uwp-node";
+		static public string serviceName = "uwp-node";
+		static public string appName = Package.Current.DisplayName;
+		static public string mutexName = $"{serviceName}-{appName}-mutex";
 
-        static public List<Action<ValueSet, ValueSet>> handlers = new List<Action<ValueSet, ValueSet>>();
+		// Connection to UWP app
+		static public AppServiceConnection connection = null;
+		// Internal named pipe shared with child processes.
+        static public NamedPipe pipe = null;
 
+		// TODO: API for setting this
+		// Default setting: BG process is kept alive if child processes are running (when the app closes).
+		// BG and child processes will be killed if set to false.
+		static public bool keepAlive = true;
+		// TODO
+		static public bool isUwpAppRunning {
+			get { return connection != null; }
+		}
 
+		// Fires when connection to UWP app has been establised.
+		// Either right after launch of the background process, or later on when the app is restarted.
+		static public event Action appConnection;
+		// Fires when connection to UWP app has been lost.
+		// Usually when the app closes or crashes.
+		static public event Action appClose;
+		// Message from UWP (request)
+		static public event Action<ValueSet, ValueSet> appMessage;
+		// Message from child processes
+		static public event Action<string> childMessage;
 
-        static IPC() {
-            //MessageBox.Show("ipc static constructor");
-            CreateUwpConnection();
+		static IPC() {
+            ConnectToUwp();
             //CreateChildProcessPipe();
             int pid = Process.GetCurrentProcess().Id;
-        }
+		}
 
-        static public void CreateChildProcessPipe() {
-            childInternalIpcPipe = new NamedPipe(serviceName, 100);
-        }
+		static public void CreateChildProcessPipe() {
+			pipe = new NamedPipe(serviceName, 100);
+			string temp = "";
+			pipe.data += (byte[] buffer) => {
+				try {
+					temp += Encoding.UTF8.GetString(buffer);
+					List<string> messages = temp.Split('\n').ToList();
+					var incomplete = messages.Last();
+					foreach (string message in messages.Take(messages.Count - 1)) {
+						childMessage?.Invoke(message);
+					}
+					temp = incomplete;
+				} catch { }
+			};
+		}
 
-        static private void OnChildPipeData(object sender, object data) {
-            byte[] buffer = data as byte[];
-            string str = System.Text.Encoding.UTF8.GetString(buffer);
-            Console.WriteLine($"data {buffer.Length} {str}");
-            childInternalIpcPipe.Write(buffer, sender);
-        }
-
-        static public async Task CreateUwpConnection() {
+        static public async Task ConnectToUwp() {
             if (connection != null) return;
             connection = new AppServiceConnection();
             connection.PackageFamilyName = Package.Current.Id.FamilyName;
@@ -58,29 +95,32 @@ namespace BackgroundProcess {
             connection.ServiceClosed += OnServiceClosed;
             connection.RequestReceived += OnUwpMessage;
             AppServiceConnectionStatus status = await connection.OpenAsync();
-            if (status != AppServiceConnectionStatus.Success) {
-                MessageBox.Show($"Failed to connect uwp-node background process to UWP App {Package.Current.DisplayName}: {status}");
-            }
-        }
+			if (status == AppServiceConnectionStatus.Success) {
+				appConnection?.Invoke();
+			} else {
+                MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appName}: {status}");
+			}
+		}
 
-        static public async Task EnsureConnection() {
-            // TODO: do a better detection of when to create connection
-            // if the app is closed and CreateConnection() is called, the app will temporarily open and close again.
-            // Might cause troubless with high traffic ipc
-            if (connection != null) return;
-            await CreateUwpConnection();
-        }
+		static void DestroyUwpConnection() {
+			if (connection == null) return;
+			try {
+				connection.Dispose();
+			} finally {
+				connection = null;
+			}
+		}
 
         static public async void OpenUwpApp(object sender = null, EventArgs args = null) {
             IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
             await appListEntries.First().LaunchAsync();
-            await EnsureConnection();
+			DestroyUwpConnection();
+			await ConnectToUwp();
         }
 
         static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
-            //MessageBox.Show("OnServiceClosed"); // TODO: delete
-            connection.ServiceClosed -= OnServiceClosed;
-            connection = null;
+			DestroyUwpConnection();
+			appClose?.Invoke();
         }
 
         static private async void OnUwpMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
@@ -90,8 +130,7 @@ namespace BackgroundProcess {
             ValueSet req = e.Request.Message;
             ValueSet res = new ValueSet();
             try {
-                foreach (Action<ValueSet, ValueSet> handler in handlers)
-                    handler(req, res);
+				appMessage?.Invoke(req, res);
             } catch (Exception err) {
                 res.Add("error", err.ToString());
             }
@@ -118,18 +157,20 @@ namespace BackgroundProcess {
                 await connection.SendMessageAsync(valueset);
         }
 
-        static public async Task SendToChildProcesses(ValueSet valueset) {
-            string json = ValueSetToJson(valueset);
-            byte[] buffer = Encoding.UTF8.GetBytes(json);
-            await childInternalIpcPipe.Write(buffer);
+        static public async Task SendToChildProcesses(string message) {
+            byte[] buffer = Encoding.UTF8.GetBytes(message + "\n");
+            await pipe.Write(buffer);
         }
 
-        static public string ValueSetToJson(ValueSet message) {
-            List<string> properties = new List<string>() { "John", "Anna", "Monica" };
-            foreach (var pair in message)
-                properties.Add($"\"{pair.Key}\": \"{pair.Value}\"");
-            return "{" + String.Join(", ", properties.ToArray()) + "}";
-        }
+		static public async Task NotifyMasterBgProcess() {
+			try {
+				var pipe = new NamedPipeClientStream(".", IPC.mutexName, PipeDirection.InOut, PipeOptions.Asynchronous);
+				await pipe.ConnectAsync();
+			} catch (Exception err) {
+				MessageBox.Show($"error {err}");
+			}
+		}
+
 
 
     }

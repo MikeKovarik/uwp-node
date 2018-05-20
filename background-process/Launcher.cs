@@ -12,11 +12,11 @@ namespace BackgroundProcess {
 
     class Launcher {
 
-        Dictionary<int, Process> processes = new Dictionary<int, Process>();
+        public Dictionary<int, Process> processes = new Dictionary<int, Process>();
         Dictionary<Process, List<NamedPipe>> procPipes = new Dictionary<Process, List<NamedPipe>>();
 
         public Launcher() {
-            IPC.handlers.Add(MessageHandler);
+			IPC.appMessage += MessageHandler;
         }
 
         void MessageHandler(ValueSet req, ValueSet res) {
@@ -92,17 +92,18 @@ namespace BackgroundProcess {
             }
         });
 
+		// TODO
         public async void StartNodeProcess(ValueSet req, ValueSet res) {
             //StartServer("mypipe");
             string name = "mypipe";
-            string[] pipeList = new string[] {"3","4","5"};
+            string[] pipeList = new string[] {"3","4","5"}; // TODO
             foreach (var pipeName in pipeList) {
             }
             NamedPipe pipe = new NamedPipe(name);
             Process proc = null;
-            pipe.data += (object sender, object data)  => OnPipeData(proc, sender as NamedPipe, data);
-            pipe.error += (object sender, object data) => OnPipeError(proc, sender as NamedPipe, data);
-            pipe.end += (object sender, object data)   => OnPipeEnd(proc, sender as NamedPipe);
+            pipe.data  += (byte[] data) => OnPipeData(proc, pipe, data);
+            pipe.error += (string err)  => OnPipeError(proc, pipe, err);
+            pipe.end   += ()            => OnPipeEnd(proc, pipe);
             var info = new ProcessStartInfo();
             //info.Environment.Add("hello", "world"); // TODO
             proc = await StartProcess(req, res, info);
