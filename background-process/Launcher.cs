@@ -1,14 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO.Pipes;
-using System.Text;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using Windows.Foundation.Collections;
 
 
-namespace BackgroundProcess {
+namespace UwpNodeBroker {
 
     class Launcher {
 
@@ -16,36 +13,30 @@ namespace BackgroundProcess {
         Dictionary<Process, List<NamedPipe>> procPipes = new Dictionary<Process, List<NamedPipe>>();
 
         public Launcher() {
-			IPC.appMessage += MessageHandler;
-        }
+			IPC.appMessage += (ValueSet req, ValueSet res) => {
+				// Only command without PID is starting a program.
+				if (req["program"] != null) {
+					string program = req["program"] as string;
+					if (program == "node.exe" || program == "node")
+						StartNodeProcess(req, res);
+					else
+						StartProcess(req, res);
+					return;
+				}
+				// From now on we deal with exact process.
+				if (req["pid"] == null) return;
+				// Get PID and Process instance of targetted process.
+				int.TryParse(req["pid"] as string, out int pid);
+				processes.TryGetValue(pid, out Process proc);
+				// Handlers
+				if (req["stop"] != null)
+					StopProcess(pid);
+				if (req["stdin"] != null)
+					InsertStdin(proc, req["stdin"] as string);
+			};
+		}
 
-        void MessageHandler(ValueSet req, ValueSet res) {
-            if (!req.ContainsKey("event")) return;
-            int pid;
-            Process proc;
-            switch (req["cmd"] as string) {
-                case "process-start":
-                    StartProcess(req, res);
-                    break;
-                case "process-stop":
-                    int.TryParse(req["pid"] as string, out pid);
-                    StopProcess(pid);
-                    break;
-                case "process-stdin":
-                    int.TryParse(req["pid"] as string, out pid);
-                    processes.TryGetValue(pid, out proc);
-                    InsertStdin(proc, req["data"] as string);
-                    break;
-                case "process-detach":
-                    // TODO
-                    break;
-                case "process-reattach":
-                    // TODO
-                    break;
-            }
-        }
-
-        public Task<Process> StartProcess(ValueSet req, ValueSet res, ProcessStartInfo info = null) => Task<Process>.Factory.StartNew(() => {
+		public Task<Process> StartProcess(ValueSet req, ValueSet res, ProcessStartInfo info = null) => Task<Process>.Factory.StartNew(() => {
             try {
                 Process proc = new Process();
                 if (info == null)
