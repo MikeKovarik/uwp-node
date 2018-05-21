@@ -7,7 +7,7 @@
     <ProjectGuid>{D42EC2F2-98F4-439E-8367-0EDDDE7F2A21}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>uwp-node</RootNamespace>
-    <AssemblyName>uwp-node</AssemblyName>
+    <AssemblyName>uwp-node-broker</AssemblyName>
     <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -82,14 +82,8 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="Resources\Icon.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="Resources\Icon1.ico" />
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy /y /s "$(SolutionDir)background-process\bin\$(ConfigurationName)\uwp-node.exe" "$(SolutionDir)"</PostBuildEvent>
+    <PostBuildEvent>xcopy /y /s "$(SolutionDir)broker-process\bin\$(ConfigurationName)\uwp-node-broker.exe" "$(SolutionDir)"</PostBuildEvent>
   </PropertyGroup>
 </Project>

@@ -7,29 +7,16 @@ using Windows.ApplicationModel.Core;
 using Windows.ApplicationModel.AppService;
 using Windows.Foundation.Collections;
 using System.Windows.Forms;
-using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Diagnostics;
-using System;
-using System.Threading.Tasks;
-using Windows.ApplicationModel.Activation;
-using Windows.ApplicationModel.AppService;
-using Windows.ApplicationModel.Background;
-using Windows.ApplicationModel.Core;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-using Windows.Foundation.Metadata;
-using Windows.UI.Core;
-using Windows.UI.Popups;
-using System.Management;
 
 
 // Package.Current.DisplayName
 // Package.Current.Id.FamilyName
 // Package.Current.InstalledLocation.Path
 
-namespace BackgroundProcess {
+namespace UwpNodeBroker {
 
     class IPC {
 		// TODO: handle when the apps reopens but not by this process.

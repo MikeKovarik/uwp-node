@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27428.2015
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "background-process", "background-process\background-process.csproj", "{D42EC2F2-98F4-439E-8367-0EDDDE7F2A21}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "broker-process", "broker-process\broker-process.csproj", "{D42EC2F2-98F4-439E-8367-0EDDDE7F2A21}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "runtime-component", "runtime-component\runtime-component.csproj", "{AEE24E5A-342C-411D-A2C4-0F1967C704F2}"
 EndProject
