@@ -1,44 +1,31 @@
 import {isUwp} from './util.mjs'
 import {ChildProcess} from './uwp-ChildProcess.mjs'
+import {
+	ERR_INVALID_OPT_VALUE,
+	ERR_CHILD_PROCESS_IPC_REQUIRED
+} from './uwp-util.mjs'
 
 
 export var spawn
+export var spawnAsAdmin
 export var exec
+export var execAsAdmin
 export var fork
+export var forkAsAdmin
 
 if (isUwp) {
-
-	// all of child's stdin, stdout and stderr are piped into main process' stdio
-	//var stdio = ['inherit', 'inherit', 'inherit']
-	//var stdio = [process.stdin, process.stdout, process.stderr]
-	//var stdio = [0, 1, 2]
-	//var stdio = [0, 'inherit', process.stderr]
-
-	// child.stdin and child.stdout are created, child.stderr is piped into process.stderr
-	//var stdio = ['pipe', 'pipe', process.stderr]
-	//var stdio = ['pipe', 'pipe', 3]
-
-	// custom stream for child.stdin, stdout and stderr are piped into main process' stdout and stderr
-	// i.e. logs and errors from child are printed out in main process' console as well.
-	//var stdio = ['pipe', 1, 2]
-	//var stdio = ['pipe', 1, 2, 'ipc']
-
-
-
-
-	// TODO. implement contents of normalizeSpawnArguments() from lib/child_process.js
-
 
 	function stdioStringToArray(option) {
 		switch (option) {
 			case 'ignore':
 			case 'pipe':
 			case 'inherit':
-				return [option, option, option, 'ipc'];
+				return [option, option, option, 'ipc']
 			default:
-				throw new ERR_INVALID_OPT_VALUE('stdio', option);
+				throw new ERR_INVALID_OPT_VALUE('stdio', option)
 		}
 	}
+
 	fork = async function(program, args = [], options = {}) {
 		if (typeof args === 'object' && !Array.isArray(args)) {
 			options = args
@@ -60,15 +47,20 @@ if (isUwp) {
 	}
 
 
-
-	spawn = function(program, args = [], options = {}) {
+	// NOTE: this does not implement the insanely complex checks that node does
+	// in https://github.com/nodejs/node/blob/master/lib/child_process.js
+	function normalizeSpawnArguments(program, args = [], options = {}) {
 		if (typeof args === 'object' && !Array.isArray(args)) {
 			options = args
 			args = []
 		}
-		return new ChildProcess(program, args, options)
+		return [program, args, options]
 	}
 
+	spawn = function(...spawnArgs) {
+		var [program, args, options] = normalizeSpawnArguments(...spawnArgs)
+		return new ChildProcess(program, args, options)
+	}
 
 
 	exec = async function(command, options = {}, callback) {
@@ -97,9 +89,10 @@ if (isUwp) {
 	}
 
 
-
 	function awaitEvent(emitter, name) {
 		return new Promise(resolve => emitter.once(name, resolve))
 	}
+
+
 
 }
