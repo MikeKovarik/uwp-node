@@ -1,5 +1,5 @@
 import {EventEmitter} from 'events'
-import {rtComponent} from './util.mjs'
+import {rtComponent} from './uwp-util.mjs'
 
 var {FullTrustProcessLauncher} = Windows.ApplicationModel
 var {ValueSet} = Windows.Foundation.Collections
@@ -24,49 +24,60 @@ function valueSetToObject(valueSet) {
 
 export var connection
 
-class NodeUwpIpc extends EventEmitter {
+class BrokerProcess extends EventEmitter {
 
 	constructor() {
-		var onMessage = valueSet => {
-			this.emit('message', valueSet)
-		}
+		this.connected = false
+		this.killed = false
+		var onMessage = valueSet => super.emit('message', valueSet)
 		rtComponent.addEventListener('connection', conn => {
 			connection = conn
 			connection.addEventListener('requestreceived', onMessage)
 			this.connected = true
-			this.emit('connection', connection)
+			this.killed = false
+			super.emit('connection', connection)
 		})
 		rtComponent.addEventListener('canceled', () => {
 			connection.removeEventListener('requestreceived', onMessage)
 			connection = undefined
 			this.connected = false
-			this.emit('close')
+			this.killed = true
+			super.emit('close')
 		})
 	}
 
-	async send() {
-		var valueSet = objectToValueSet(object)
+	async send(object) {
+		if (!this.connected) return
+		if (typeof object === 'string') {
+			var valueSet = new ValueSet
+			valueSet.insert('event', object)
+		} else {
+			var valueSet = objectToValueSet(object)
+		}
 		var result = await wrapUwpPromise(rtComponent.send(valueSet))
 		console.log('result', result)
-		var object = valueSetToObject(result)
-		if (object.error)
-			throw new Error(object.error)
-		return object
+		if (result.error)
+			throw new Error(result.error)
+		return valueSetToObject(result)
+	}
+
+	emit(name, data) {
+		super.emit(name, data)
+		var valueSet = new ValueSet
+		valueSet.insert('event', name)
+		valueSet.insert('data', data)
 	}
 
 	async launch() {
 		try {
 			await FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
 		} catch(err) {
-			this.emit('error', err.toString())
+			super.emit('error', err.toString())
 		}
 	}
 
 	kill() {
-	}
-
-	reattach() {
-		// TODO: can this be even done?
+		this.emit('kill')
 	}
 
 	start() {return this.launch()}
@@ -74,4 +85,4 @@ class NodeUwpIpc extends EventEmitter {
 
 }
 
-export var nodeUwpIpc = new NodeUwpIpc
+export var broker = new BrokerProcess
