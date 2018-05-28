@@ -56,6 +56,7 @@ class BrokerProcess extends EventEmitter {
 		}
 		var result = await wrapUwpPromise(rtComponent.send(valueSet))
 		console.log('result', result)
+		// Reject the promise if response contains 'error' property (the call failed).
 		if (result.error)
 			throw new Error(result.error)
 		return valueSetToObject(result)
@@ -72,7 +73,7 @@ class BrokerProcess extends EventEmitter {
 		try {
 			await FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
 		} catch(err) {
-			super.emit('error', err.toString())
+			super.emit('error', err)
 		}
 	}
 

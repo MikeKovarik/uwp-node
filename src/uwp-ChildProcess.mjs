@@ -1,7 +1,10 @@
 import {EventEmitter} from 'events'
 import {Readable, Writable, Duplex} from 'stream'
-import {createIpcChannel, sendIpcMessage} from './util.mjs'
-
+import {broker} from './uwp-broker.mjs'
+import {setupChannel} from './util.mjs'
+import {
+	ERR_INVALID_OPT_VALUE
+} from './uwp-util.mjs'
 
 
 const STDIN = 0
@@ -15,16 +18,17 @@ export class ChildProcess extends EventEmitter {
 	constructor(program, args = [], options = {}) {
 		super()
 
-		this._closesNeeded = 1;
-		this._closesGot = 0;
-		this.connected = false;
+		if (!broker.connected)
+			throw new Error(`child process ${program} could not be spawned because uwp-node-broker process is not running.`)
 
-		this.signalCode = null;
-		this.exitCode = null;
-		this.killed = false;
-		this.spawnfile = null;
+		this._closesNeeded = 1
+		this._closesGot = 0
 
-		var emitError = err => this.emit('error', err)
+		this.signalCode = null
+		this.exitCode = null
+		this.killed = false
+
+		this._onMessage = this._onMessage.bind(this)
 
 		this._prepareStdio(options.stdio || 'pipe')
 		
@@ -32,45 +36,25 @@ export class ChildProcess extends EventEmitter {
 		this.stdout = this.stdio[1] || null
 		this.stderr = this.stdio[2] || null
 
-		this.stdin._write = (chunk, encoding, cb) => {
-			// TODO: throw error if the process is dead
-			var options = {
-				pid: this.pid,
-				stdin: chunk.toString()
-			}
-			sendIpcMessage(options)
-				.then(() => cb()) // warning: no arg can be passed into cb
-				.catch(emitError)
-		}
 		if (!options.cwd)
 			options.cwd = Windows.ApplicationModel.Package.current.installedLocation.path
+
 		// Extend options to be passed into runtime component but preserve user's options object.
 		options = Object.assign({}, options)
 		options.program = program
 		options.args = args.join(' ')
-		options.spawn = 'endless' //
+		// 'spawn' - long running with asynchronous evented STDIO.
+		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
+		options.startProcess = options.startProcess || 'spawn'
+
 		// Launch the process.
-		sendIpcMessage(options)
+		broker.send(options)
 			.then(response => {
 				this.pid = response.pid
-				this.connected = true
+				// Attach stdio events listeners and pipes to the broker process.
+				this._attachToBroker()
 			})
-			.catch(emitError)
-		
-		var onInternalMessage = vs => {
-			if (vs.pid !== this.pid) return
-			if (vs.processStdout) this.stdout.push(vs.stdout)
-			if (vs.processStderr) this.stderr.push(vs.stderr)
-			if (vs.processExited) this._onExit(parseInt(vs.exitCode))
-		}
-		var killback = () => {
-			uwpNode.removeEventListener('message', onInternalMessage)
-		}
-		// TODO: handle the events and killback better.
-		uwpNode.addEventListener('message', onInternalMessage)
-		this.once('close', killback)
-		this.once('error', killback)
-
+			.catch(err => this.emit('error', err))
 	}
 
 	// TODO
@@ -78,11 +62,15 @@ export class ChildProcess extends EventEmitter {
 		// signal is string like 'SIGHUP'
 		// this.emit(code, signal)
 		this.killed = true
-	}
-
-	// TODO
-	disconnect() {
-		this.connected = false
+		// TODO
+		this._pipes.forEach(stream => {
+			if (pipe != null) {
+				stream.destroy()
+				stream.removeAllListeners()
+			}
+		})
+		broker.removeListener('message', this._onMessage)
+		this.removeAllListeners()
 	}
 
 	_onExit(exitCode, signalCode) {
@@ -91,7 +79,14 @@ export class ChildProcess extends EventEmitter {
 		this.exitCode = exitCode
 		if (this.stdin)
 			this.stdin.destroy()
-		this.emit('exit', this.exitCode, this.signalCode)
+		if (exitCode < 0) {
+			//var err = errnoException(exitCode, 'spawn') // TODO
+			var err = new Error('Couldnt spawn, exitcode: ' + exitCode) // TODO
+			this.emit('error', err)
+		} else {
+			this.emit('exit', this.exitCode, this.signalCode)
+		}
+		this._maybeClose()
 	}
 
 	_maybeClose() {
@@ -101,7 +96,7 @@ export class ChildProcess extends EventEmitter {
 	}
 
 	_prepareStdio(stdio = 'pipe') {
-		// Replace shortcut with an array
+		// Transform shortcut form into an array.
 		if (typeof stdio === 'string') {
 			switch (stdio) {
 				case 'ignore':  stdio = ['ignore', 'ignore', 'ignore']; break
@@ -128,30 +123,42 @@ export class ChildProcess extends EventEmitter {
 		// Create streams for communication with the child process.
 		// These are the one representing child's stdin, stdout, stderr and other custom pipes
 		// that pierce the boundary of main processes and serve as sink/source for child.
-		this._stdioStreams = stdio.map((item, i) => {
+		this._pipes = stdio.map((item, fd) => {
 			if (item === 'ignore')
 				return null
-			if (i === STDIN)
+			if (fd === STDIN)
 				return new Writable
-			if (i === STDOUT || i === STDERR)
+			if (fd === STDOUT || fd === STDERR)
 				var stream = new Readable
 			else
 				var stream = new Duplex
-			stream._read = () => {}
-			stream.on('close', () => this._maybeClose(this))
-			this._closesNeeded++
 			if (item === 'ipc')
 				stream.ipc = true
+			// Reading can't be forced
+			stream._read = () => {}
+			// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.
+			this._closesNeeded++
+			stream.fd = fd
+			stream.on('close', () => console.log('stdio closed', fd, 'this._closesNeeded', this._closesNeeded)) // TODO DELETE
+			stream.on('close', () => this._maybeClose(this))
+			//stream.on('error', err => this.emit('error', err)) // TODO: this is an idea. check it out
 			return stream
 		})
+
 		// Copy internal streams array into Node's proc.stdio and replace 'ipc' with null if needed.
-		this.stdio = this._stdioStreams.slice(0)
+		this.stdio = this._pipes.slice(0)
 		if (stdio.includes('ipc')) {
-			this._closesNeeded++
-			createIpcChannel(this, stdio.indexOf('ipc'))
-			// 'ipc' is integrated into the process object. The stream is not directly available.
-			this.stdio[this.channel.fd] = null
+			//this._closesNeeded++
+			let fd = stdio.indexOf('ipc')
+			// Create Duplex stream on which messages will be received,
+			this.channel = this.stdio[fd]
+			// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
+			// handle and parse incomming data and re-emit it as 'message' events.
+			setupChannel(target, channel)
+			// IPC channel is integrated into the process object. The stream is not directly available.
+			this.stdio[fd] = null
 		}
+
 		// Array of user defined streams that are piped to/from child process' stdio streams.
 		// i.e. numbers, 'inherit', custom streams
 		var targets = stdio.map(item => {
@@ -160,6 +167,7 @@ export class ChildProcess extends EventEmitter {
 			if (item instanceof Readable || item instanceof Writable)
 				return item
 		})
+
 		// Wire stdio and inherit-targets together by piping data between them.
 		for (var i = 0; i < stdio.length; i++) {
 			let stdioStream = stdio[i]
@@ -170,6 +178,55 @@ export class ChildProcess extends EventEmitter {
 			if (targetStream instanceof Readable && stdioStream instanceof Writable)
 				targetStream.pipe(stdioStream)
 		}
+
 	}
+
+	_attachToBroker() {
+		for (var pipe of this._pipes) {
+			if (!(pipe instanceof Writable)) continue
+			pipe._write = (chunk, encoding, cb) => {
+				var options = {
+					pid: this.pid,
+					fd: pipe.fd,
+					data: chunk,
+				}
+				broker.send(options)
+					.then(() => cb()) // warning: no arg can be passed into cb
+					.catch(err => pipe.emit('error', err))
+			}
+		}
+		
+		var killback = () => broker.removeListener('message', this._onMessage)
+		// TODO: handle the events and killback better.
+		broker.on('message', this._onMessage)
+		this.once('close', killback)
+		this.once('error', killback)
+	}
+
+	_onMessage(res) {
+		// Only accept messages with PID of this process.
+		if (res.pid !== this.pid) return
+		if (res.exitCode) this._onExit(res.exitCode)
+		if (res.fd !== undefined) {
+			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
+			var pipe = this._pipes[res.fd]
+			if (res.data === null) {
+				// Underlying C# stream ended and sent null. Now we need to close the JS stream.
+				pipe.push(null)
+			} else if (res.data !== undefined) {
+				// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
+				// But we have to make it a Buffer ourselves (to make it use the U8A memory, instead of copying).
+				// Also works when we receive string instead of bytes.
+				pipe.push(Buffer.from(res.data))
+			}
+			// Emit error on the stream given by fd.
+			if (res.error) pipe.emit('error', res.error)
+		} else {
+			// Emit bigass error on the process object. Something gone very wrong.
+			if (res.error) this.emit('error', res.error)
+		}
+	}
+
+	//connected, disconnect() and send() are implemented by setupChannel()
 
 }
