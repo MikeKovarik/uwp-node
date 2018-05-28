@@ -1,0 +1,8 @@
+*
+.*
+!uwp.js
+!node.js
+!index.js
+!src/*
+!UwpNode.winmd
+!uwp-node-broker.exe
