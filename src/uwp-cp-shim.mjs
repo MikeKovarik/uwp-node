@@ -63,31 +63,26 @@ if (isUwp) {
 	}
 
 
+	// WARNING: we're implementing only the promisified non-returning variant of exec().
+	// exec() waits with its callback for the process to close and the function by default also
+	// returns ChildProcess instance. But it's pretty much useless since we're only waiting for
+	// complete stdout and stderr and we can't even define (create custom) pipes or use stdin.
 	exec = async function(command, options = {}, callback) {
 		if (typeof options === 'function') {
 			callback = options
 			options = {}
 		}
 		options.shell = options.shell || 'cmd.exe'
-		try {
-			var child = new ChildProcess(options.shell, command.split(' '), options)
-			var stdout = ''
-			var stderr = ''
-			child.stdout.on('data', buffer => stdout += buffer)
-			child.stderr.on('data', buffer => stderr += buffer)
-			await awaitEvent(child, 'exit')
-			if (callback)
-				callback(null, stdout, stderr)
-			else
-				return {stdout, stderr}
-		} catch(err) {
-			if (callback)
-				callback(err)
-			else
-				throw err
-		}
-	}
+		options.startProcess = 'exec'
 
+		return broker.send(options)
+			.then(res => {
+				var {stdout, stderr} = res
+				return {stdout, stderr}
+			})
+			// TODO: might need to be changed if internal error handling changes
+			//.catch(err => this.emit('error', err))
+	}
 
 	function awaitEvent(emitter, name) {
 		return new Promise(resolve => emitter.once(name, resolve))
