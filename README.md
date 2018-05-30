@@ -4,8 +4,10 @@ Windows UWP apps can be useful at last, run node scripts from within them!
 
 More info and series of blogposts on how to use it is comming soon.
 
-<a href="https://www.instagram.com/p/BiEwg3zj_s-/?taken-by=we.are.mutiny" style="text-align: center">
-	<img src="https://scontent-vie1-1.cdninstagram.com/vp/7afa805b72ae928245bae296ceb98408/5BBED6EB/t51.2885-15/s750x750/sh0.08/e35/30890652_170062257041887_1003579766533521408_n.jpg">
+<p align="center">
+	<a href="https://www.instagram.com/p/BiEwg3zj_s-/?taken-by=we.are.mutiny">
+		<img src="https://scontent-vie1-1.cdninstagram.com/vp/0935f4ead8e0e615e088fdb15560eb73/5B9EDCC6/t51.2885-15/s640x640/sh0.08/e35/30890652_170062257041887_1003579766533521408_n.jpg">
+	</a>
 </a>
 
 ## Installation
@@ -18,8 +20,7 @@ not yet published to npm
 
 ## In the wild
 
-`uwp-node` is currently being used to rewrite Electron based app [`Anchora`](https://github.com/MikeKovarik/anchora
-) as a UWP (HTML/JS) app.
+`uwp-node` is currently being used to rewrite Electron based app [`Anchora`](https://github.com/MikeKovarik/anchora-app) as a UWP (HTML/JS) app.
 
 ## Credits
 
