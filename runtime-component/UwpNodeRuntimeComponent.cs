@@ -1,14 +1,8 @@
 ﻿using System;
-using System.Threading.Tasks;
 using Windows.ApplicationModel.Activation;
 using Windows.ApplicationModel.AppService;
 using Windows.ApplicationModel.Background;
-using Windows.ApplicationModel.Core;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
 using Windows.Foundation.Metadata;
-using Windows.UI.Core;
-using Windows.UI.Popups;
 
 
 namespace UwpNode {

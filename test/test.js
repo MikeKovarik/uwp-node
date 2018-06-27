@@ -21,37 +21,31 @@ function awaitEvent(emitter, name) {
 }
 
 
-
+/*
 describe('cleanup of custom arguments in child process', () => {
 
 	it(`default stdio`, async () => {
-		var proc = spawn('node', ['child-simple.js'])
+		var proc = spawn('node', ['child.js'])
 		await stdoutWithoutIpc(proc)
 	})
 
 	it(`added ipc arg is hidden after implementation`, async () => {
 		var env = {
-			'uwp-node-ipc': '4',
+			'uwp-node-stdio-ipc': '4',
 			'uwp-node-stdio': 'ipcpipename',
+			'uwp-node-broker-pipe': 'mypipe',
 		}
-		var proc = spawn('node', ['child-simple.js'], {env})
-		//var out = (await awaitEvent(proc.stdout, 'data')).toString().trim()
-		//console.log(out)
-		proc.stdout.on('data', err => console.log(err.toString()))
-		proc.stderr.on('data', err => console.log(err.toString()))
-		//await stdoutWithIpc(proc)
+		var proc = spawn('node', ['child-env.js'], {env})
+		//proc.stdout.on('data', err => console.log(err.toString()))
+		//proc.stderr.on('data', err => console.log(err.toString()))
+		var json = (await awaitEvent(proc.stdout, 'data')).toString().trim()
+		assert.notInclude(json, 'uwp-node-stdio-ipc')
+		assert.notInclude(json, 'uwp-node-stdio')
+		assert.notInclude(json, 'uwp-node-broker-pipe')
 	})
-/*
-	it(`added ipc arg is hidden after implementation`, async () => {
-		var env = {}
-		var proc = spawn('node', ['child-simple.js'])
-		var out = (await awaitEvent(proc.stdout, 'data')).toString().trim()
-		proc.kill()
-		assert.equal(out, '')
-	})
-*/
-})
 
+})
+*/
 
 /*
 describe('spawn - basic stdio', () => {
@@ -157,7 +151,8 @@ describe('spawn - basic stdio', () => {
 	})
 
 })
-
+*/
+/*
 describe('spawn - stdio with 4 args or ipc', () => {
 
 	it(`[null, null, null, null]`, async () => {
@@ -232,3 +227,27 @@ describe('spawn - stdio with 4 args or ipc', () => {
 
 })
 */
+
+describe('spawn - additional ipc methods and propeties', () => {
+
+	it(`[null, null, null] shares stdout and stderr + creates stdio and ipc stream`, async () => {
+		var stdio = [null, null, null]
+		var proc = spawn('node', ['child-ipc.js'], {stdio})
+		proc.stdout.on('data', err => console.log(err.toString()))
+		proc.stderr.on('data', err => console.log(err.toString()))
+		assert.isFalse(proc.connected, 'process.connected exists (and is false) despite ipc')
+		assert.isUndefined(proc.send, 'process.send() does not exists because of ipc')
+		assert.isUndefined(proc.disconnect, 'process.disconnect() does not exists because of ipc')
+	})
+
+	it(`[null, null, null, 'ipc'] shares stdout and stderr + creates stdio and ipc stream`, async () => {
+		var stdio = [null, null, null, 'ipc']
+		var proc = spawn('node', ['child-ipc.js'], {stdio})
+		proc.stdout.on('data', err => console.log(err.toString()))
+		proc.stderr.on('data', err => console.log(err.toString()))
+		assert.isTrue(proc.connected, 'process.connected exists (and is true) because of ipc')
+		assert.exists(proc.send, 'process.send() exists because of ipc')
+		assert.exists(proc.disconnect, 'process.disconnect() exists because of ipc')
+	})
+
+})

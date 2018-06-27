@@ -18,7 +18,7 @@ var servers = customPipeNames
 
 // additional custom uwp-node's created with named-pipes
 var env = {
-	'uwp-node-ipc': ipcFd,
+	'uwp-node-stdio-ipc': ipcFd,
 	'uwp-node-stdio': customPipeNames.join(','),
 }
 // default node's STDIO

@@ -1,10 +1,9 @@
 import {EventEmitter} from 'events'
-import {isNode, setupChannel, handleStreamJson} from './util.mjs'
-import {createNamedPipe} from './node-util.mjs'
+import {isNode, handleStreamJson, setupChannel} from './util.mjs'
+import {createNamedPipe} from './util.mjs'
 
 
 export var broker
-export var app
 
 if (isNode) {
 
@@ -12,17 +11,19 @@ if (isNode) {
 
 	// Name of the pipe used by uwp-node for internal messages
 	if (env['uwp-node-broker-pipe']) {
-		app = new EventEmitter
-		//app.open = () => broker.
-		//app.close = () => broker.
 
 		var pipeName = env['uwp-node-broker-pipe']
 		delete env['uwp-node-broker-pipe']
+
 		try {
 			broker = createNamedPipe(pipeName)
+			// Creates .send() method that wraps every sent message into \n delimeted JSONs
+			// and unwraps and parses incoming data and exposes it as 'message' event.
+			setupChannel(broker, broker)
 		} catch (err) {
 			throw new Error('Could not connect to uwp-node-broker')
 		}
+
 		handleStreamJson(broker, event => {
 			switch (event) {
 				//case 'kill':
@@ -30,7 +31,17 @@ if (isNode) {
 				//	break;
 				default:
 			}
+			broker.emit(event)
 		})
+
+		broker.send = function(message) {
+			if (!this.connected) {
+				 // todo, this should be handled by setupChannel()
+				throw new Error(`Cannot connect to uwp-node-broker`)
+			}
+			this.write(JSON.stringify(message) + '\n')
+		}
+
 	}
 
 }

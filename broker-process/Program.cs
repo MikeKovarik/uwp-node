@@ -50,10 +50,10 @@ namespace UwpNodeBroker {
 			// that slave instance has been created. Those are created when UWP app is restarted but it does
 			// not have referrence to previous (master) instance. We're using this because WMI events require
 			// admin priviledges and there are no other way of watching app or process start in C# nor UWP. 
-			var pipe = new NamedPipe(IPC.mutexName, 100);
+			var slavePipe = new NamedPipe(IPC.mutexName, 100);
 			// Connect to UWP app if we detect new one has been started but it has no means of connecting to
 			// this BG process instance.
-			pipe.connection += () => IPC.ConnectToUwp();
+			slavePipe.connection += () => IPC.ConnectToUwp();
 			// Keep updating child processed of UWP app lifecycle
 			IPC.appConnection += () => IPC.SendToChildProcesses("app-connection");
 			IPC.appClose      += () => IPC.SendToChildProcesses("app-close");

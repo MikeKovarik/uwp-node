@@ -1,48 +1,41 @@
 import {EventEmitter} from 'events'
 import {Socket} from 'net'
-import {isNode, setupChannel, handleStreamJson} from './util.mjs'
+import {isNode, setupChannel} from './util.mjs'
+import {createNamedPipe} from './util.mjs'
 
-
-export var nodeUwpIpc
 
 if (isNode) {
 
-	// Parent process PID
-	if (env['uwp-node-ppid'])
-		process.ppid = parseInt(env['uwp-node-internal-ipc'])
-
-	var ipc = false
 	var {env} = process
-	var additionalStdio
-	if (env['uwp-node-stdio']) {
-		additionalStdio = env['uwp-node-stdio'].split(',')
-		console.log('## stdio', additionalStdio)
-		//additionalStdio.map(openNamedPipe)
+
+	// Apply parent process PID.
+	if (env['uwp-node-ppid']) {
+		process.ppid = parseInt(env['uwp-node-ppid'])
+		delete env['uwp-node-ppid']
 	}
+
+	//var stdio = [process.stdin, process.stdout, process.stderr]
+	var stdio = [null, null, null]
+	var channels = []
+	if (env['uwp-node-stdio']) {
+		var pipeNames = env['uwp-node-stdio'].split(',')
+		// Cleanup the property after to prevent pollution of env vars.
+		delete env['uwp-node-stdio']
+		console.log('## stdio', pipeNames)
+		channels = pipeNames.map(createNamedPipe)
+	}
+
+	stdio = stdio.concat(channels)
 
 	// FD of the pipe used for Node style IPC
-	if (env['uwp-node-ipc']) {
-		var fd = parseInt(env['uwp-node-ipc'])
-		setupChannel(process, channel)
-	}
-
-	// Name of the pipe used by uwp-node for internal messages
-	if (env['uwp-node-internal-ipc']) {
-		var pipeName = env['uwp-node-internal-ipc']
-		// TODO
-		handleStreamJson()
-		nodeUwpIpc = new EventEmitter
-	}
-
-	function createNamedPipe(name) {
-		var fullName = getFullPipeName(name)
-		var channel = new Socket
-		channel.connect(fullName)
-		return channel
-	}
-
-	function getFullPipeName(name) {
-		return `\\\\.\\pipe\\uwp-node\\${name}-${process.pppid}`
+	if (env['uwp-node-stdio-ipc']) {
+		// Cleanup the property after to prevent pollution of env vars.
+		var fd = parseInt(env['uwp-node-stdio-ipc'])
+		delete env['uwp-node-stdio-ipc']
+		// Attach the ipc stream to process, create process.send() method,
+		// start handling incomming data and parsing it as 'message' events.
+		let ipcChannel = channels[fd]
+		setupChannel(process, ipcChannel)
 	}
 
 }

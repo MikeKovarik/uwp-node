@@ -1,9 +1,6 @@
 import {isUwp} from './util.mjs'
 import {ChildProcess} from './uwp-ChildProcess.mjs'
-import {
-	ERR_INVALID_OPT_VALUE,
-	ERR_CHILD_PROCESS_IPC_REQUIRED
-} from './uwp-util.mjs'
+import {ERR_INVALID_OPT_VALUE, ERR_CHILD_PROCESS_IPC_REQUIRED} from './errors.mjs'
 
 
 export var spawn

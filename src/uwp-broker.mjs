@@ -1,5 +1,5 @@
 import {EventEmitter} from 'events'
-import {rtComponent} from './uwp-util.mjs'
+import {rtComponent} from './util.mjs'
 
 var {FullTrustProcessLauncher} = Windows.ApplicationModel
 var {ValueSet} = Windows.Foundation.Collections
@@ -28,45 +28,43 @@ class BrokerProcess extends EventEmitter {
 
 	constructor() {
 		this.connected = false
-		this.killed = false
 		var onMessage = valueSet => super.emit('message', valueSet)
 		rtComponent.addEventListener('connection', conn => {
 			connection = conn
 			connection.addEventListener('requestreceived', onMessage)
 			this.connected = true
-			this.killed = false
 			super.emit('connection', connection)
 		})
 		rtComponent.addEventListener('canceled', () => {
 			connection.removeEventListener('requestreceived', onMessage)
 			connection = undefined
 			this.connected = false
-			this.killed = true
 			super.emit('close')
 		})
 	}
 
-	async send(object) {
-		if (!this.connected) return
-		if (typeof object === 'string') {
-			var valueSet = new ValueSet
-			valueSet.insert('event', object)
-		} else {
-			var valueSet = objectToValueSet(object)
+	async send(message) {
+		if (!this.connected) {
+				// todo, this should be handled by setupChannel()
+			throw new Error(`Cannot connect to uwp-node-broker`)
 		}
+		if (typeof object === 'string') {
+			// TODO: this 
+			message = {}
+		}
+		var valueSet = objectToValueSet(message)
 		var result = await wrapUwpPromise(rtComponent.send(valueSet))
-		console.log('result', result)
 		// Reject the promise if response contains 'error' property (the call failed).
 		if (result.error)
 			throw new Error(result.error)
-		return valueSetToObject(result)
+		if (result)
+			return valueSetToObject(result)
+	}
+	async _sendValueSet(message) {
 	}
 
-	emit(name, data) {
-		super.emit(name, data)
-		var valueSet = new ValueSet
-		valueSet.insert('event', name)
-		valueSet.insert('data', data)
+	write(buffer) {
+		console.warn('uwp-node.broker is not a stream and .write() method should not be used.')
 	}
 
 	async launch() {
@@ -78,7 +76,7 @@ class BrokerProcess extends EventEmitter {
 	}
 
 	kill() {
-		this.emit('kill')
+		this.send('kill')
 	}
 
 	start() {return this.launch()}

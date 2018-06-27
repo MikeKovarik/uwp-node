@@ -18,7 +18,7 @@ using System.Diagnostics;
 
 namespace UwpNodeBroker {
 
-    class IPC {
+	class IPC {
 		// TODO: handle when the apps reopens but not by this process.
 		//       the app would then go on to create new background process, rather than reconnecting to this one.
 		// TODO: do not pass stdio/pipe related messages down to pipes
@@ -30,7 +30,7 @@ namespace UwpNodeBroker {
 		// Connection to UWP app
 		static public AppServiceConnection connection = null;
 		// Internal named pipe shared with child processes.
-        static public NamedPipe pipe = null;
+		static public NamedPipe pipe = null;
 
 		// TODO: API for setting this
 		// Default setting: BG process is kept alive if child processes are running (when the app closes).
@@ -53,9 +53,22 @@ namespace UwpNodeBroker {
 		static public event Action<string> childMessage;
 
 		static IPC() {
-            ConnectToUwp();
-            //CreateChildProcessPipe();
-            int pid = Process.GetCurrentProcess().Id;
+			ConnectToUwp();
+			//CreateChildProcessPipe();
+			int pid = Process.GetCurrentProcess().Id;
+			// TODO: actually use it somewhere within broker + propagate it up to the app
+			/*
+			appMessage += (ValueSet req, ValueSet res) => {
+				res.contains("ipc")
+					SendToChildProcesses(req["ipc"] as string)
+			};
+			childMessage += (byte[] buffer) => {
+				// TODO: redistribution among peer node pocesses
+				var vs = new ValueSet();
+				vs.Add("ipc", buffer);
+				SendToUwp(vs);
+			};
+			*/
 		}
 
 		static public void CreateChildProcessPipe() {
@@ -74,18 +87,18 @@ namespace UwpNodeBroker {
 			};
 		}
 
-        static public async Task ConnectToUwp() {
-            if (connection != null) return;
-            connection = new AppServiceConnection();
-            connection.PackageFamilyName = Package.Current.Id.FamilyName;
-            connection.AppServiceName = serviceName;
-            connection.ServiceClosed += OnServiceClosed;
-            connection.RequestReceived += OnUwpMessage;
-            AppServiceConnectionStatus status = await connection.OpenAsync();
+		static public async Task ConnectToUwp() {
+			if (connection != null) return;
+			connection = new AppServiceConnection();
+			connection.PackageFamilyName = Package.Current.Id.FamilyName;
+			connection.AppServiceName = serviceName;
+			connection.ServiceClosed += OnServiceClosed;
+			connection.RequestReceived += OnUwpMessage;
+			AppServiceConnectionStatus status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
 				appConnection?.Invoke();
 			} else {
-                MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appName}: {status}");
+				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appName}: {status}");
 			}
 		}
 
@@ -98,56 +111,60 @@ namespace UwpNodeBroker {
 			}
 		}
 
-        static public async void OpenUwpApp(object sender = null, EventArgs args = null) {
-            IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
-            await appListEntries.First().LaunchAsync();
+		static public async void OpenUwpApp(object sender = null, EventArgs args = null) {
+			IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
+			await appListEntries.First().LaunchAsync();
 			DestroyUwpConnection();
 			await ConnectToUwp();
-        }
+		}
 
-        static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
+		static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
 			DestroyUwpConnection();
 			appClose?.Invoke();
-        }
+		}
 
-        static private async void OnUwpMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
-            MessageBox.Show("OnRequestReceived"); // TODO: delete
-            var messageDeferral = e.GetDeferral();
-            // Handle message and let registered handlers do whatever's needed.
-            ValueSet req = e.Request.Message;
-            ValueSet res = new ValueSet();
-            try {
+		static private async void OnUwpMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
+			MessageBox.Show("OnRequestReceived"); // TODO: delete
+			var messageDeferral = e.GetDeferral();
+			// Handle message and let registered handlers do whatever's needed.
+			ValueSet req = e.Request.Message;
+			ValueSet res = new ValueSet();
+			try {
 				appMessage?.Invoke(req, res);
-            } catch (Exception err) {
-                res.Add("error", err.ToString());
-            }
-            await e.Request.SendResponseAsync(res);
-            // Complete the deferral so that the platform knows that we're done responding to the app service call.
-            // Note for error handling: this must be called even if SendResponseAsync() throws an exception.
-            messageDeferral.Complete();
-        }
+			} catch (Exception err) {
+				res.Add("error", err.ToString());
+			}
+			await e.Request.SendResponseAsync(res);
+			// Complete the deferral so that the platform knows that we're done responding to the app service call.
+			// Note for error handling: this must be called even if SendResponseAsync() throws an exception.
+			messageDeferral.Complete();
+		}
 
-        static public async Task Send(string cmd, string data = null) {
-            ValueSet valueset = new ValueSet();
-            valueset.Add("cmd", cmd);
-            if (data != null)
-                valueset.Add("data", data);
-            await Send(valueset);
-        }
-        static public async Task Send(ValueSet valueset) {
-            await SendToUwp(valueset);
-            //await Task.WhenAll(SendToUwp(valueset), SendToChildProcesses(valueset));
-        }
+		static public async Task Send(string cmd, string data = null) {
+			ValueSet valueset = new ValueSet();
+			valueset.Add("cmd", cmd); // TODO
+			if (data != null)
+				valueset.Add("data", data);
+			await Send(valueset);
+		}
+		static public async Task Send(ValueSet valueset) {
+			// TODO
+			await SendToUwp(valueset);
+			//await Task.WhenAll(SendToUwp(valueset), SendToChildProcesses(valueset));
+		}
 
-        static public async Task SendToUwp(ValueSet valueset) {
-            if (connection != null)
-                await connection.SendMessageAsync(valueset);
-        }
+		static public async Task SendToUwp(ValueSet valueset) {
+			if (connection != null)
+				await connection.SendMessageAsync(valueset);
+		}
 
-        static public async Task SendToChildProcesses(string message) {
-            byte[] buffer = Encoding.UTF8.GetBytes(message + "\n");
-            await pipe.Write(buffer);
-        }
+		static public async Task SendToChildProcesses(string message) {
+			byte[] buffer = Encoding.UTF8.GetBytes(message + "\n");
+			await pipe.Write(buffer);
+		}
+		//static public async Task SendToChildProcesses(byte[] buffer) {
+		//    await pipe.Write(buffer); // TODO: "\n"
+		//}
 
 		static public async Task NotifyMasterBgProcess() {
 			try {
@@ -160,6 +177,6 @@ namespace UwpNodeBroker {
 
 
 
-    }
+	}
 
 }

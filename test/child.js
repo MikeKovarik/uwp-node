@@ -8,8 +8,3 @@ if (ipcEnabled) {
 	process.send('IPC message over process.send() from child')
 	process.once('message', message => console.log(message))
 }
-console.log(process)
-
-//var net = require('net')
-//var ipcSocket = new net.Socket({fd: 3})
-//ipcSocket.on('data', buffer => console.log(buffer.toString()))

@@ -2,9 +2,7 @@ import {EventEmitter} from 'events'
 import {Readable, Writable, Duplex} from 'stream'
 import {broker} from './uwp-broker.mjs'
 import {setupChannel} from './util.mjs'
-import {
-	ERR_INVALID_OPT_VALUE
-} from './uwp-util.mjs'
+import {ERR_INVALID_OPT_VALUE} from './errors.mjs'
 
 
 const STDIN = 0
@@ -30,7 +28,8 @@ export class ChildProcess extends EventEmitter {
 
 		this._onMessage = this._onMessage.bind(this)
 
-		this._prepareStdio(options.stdio || 'pipe')
+		options.stdio = this._sanitizeStdio(options.stdio)
+		this._prepareStdio(options.stdio)
 		
 		this.stdin  = this.stdio[0] || null
 		this.stdout = this.stdio[1] || null
@@ -95,7 +94,7 @@ export class ChildProcess extends EventEmitter {
 			this.emit('close', this.exitCode, this.signalCode)
 	}
 
-	_prepareStdio(stdio = 'pipe') {
+	_sanitizeStdio(stdio = 'pipe') {
 		// Transform shortcut form into an array.
 		if (typeof stdio === 'string') {
 			switch (stdio) {
@@ -106,7 +105,7 @@ export class ChildProcess extends EventEmitter {
 					throw new ERR_INVALID_OPT_VALUE('stdio', stdio)
 			}
 		} else if (!Array.isArray(stdio)) {
-			throw new ERR_INVALID_OPT_VALUE('stdio', util.inspect(stdio))
+			throw new ERR_INVALID_OPT_VALUE('stdio', stdio)
 		}
 
 		// Fill stdio with defaults (three ignores) if none other
@@ -120,6 +119,10 @@ export class ChildProcess extends EventEmitter {
 			return item
 		})
 
+		return stdio
+	}
+
+	_prepareStdio(stdio) {
 		// Create streams for communication with the child process.
 		// These are the one representing child's stdin, stdout, stderr and other custom pipes
 		// that pierce the boundary of main processes and serve as sink/source for child.
