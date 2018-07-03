@@ -15,6 +15,7 @@ function objectToValueSet(object) {
 		valueSet.insert(key, object[key])
 	return valueSet
 }
+
 function valueSetToObject(valueSet) {
 	var object = {}
 	for (var key of Object.getOwnPropertyNames(valueSet))
@@ -27,17 +28,29 @@ export var connection
 class BrokerProcess extends EventEmitter {
 
 	constructor() {
+		super()
 		this.connected = false
-		var onMessage = valueSet => super.emit('message', valueSet)
-		rtComponent.addEventListener('connection', conn => {
-			connection = conn
-			connection.addEventListener('requestreceived', onMessage)
+		// TODO: some more filtering between ipc and internal process messages
+		var onMessage = e => {
+			var valueSet = e.request.message
+			console.log('onMessage', valueSet)
+			if (valueSet.ipc)
+				super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
+			else
+				super.emit('_internalMessage', valueSet)
+		}
+		//var onMessage = valueSet => super.emit('message', valueSet)
+		rtComponent.addEventListener('connect', connection => {
+			this.connection = connection
+			this.connection.addEventListener('requestreceived', onMessage)
 			this.connected = true
-			super.emit('connection', connection)
+			super.emit('connection', this.connection)
 		})
 		rtComponent.addEventListener('canceled', () => {
-			connection.removeEventListener('requestreceived', onMessage)
-			connection = undefined
+			if (this.connection) {
+				this.connection.removeEventListener('requestreceived', onMessage)
+				this.connection = undefined
+			}
 			this.connected = false
 			super.emit('close')
 		})
@@ -48,19 +61,27 @@ class BrokerProcess extends EventEmitter {
 				// todo, this should be handled by setupChannel()
 			throw new Error(`Cannot connect to uwp-node-broker`)
 		}
-		if (typeof object === 'string') {
-			// TODO: this 
-			message = {}
-		}
-		var valueSet = objectToValueSet(message)
-		var result = await wrapUwpPromise(rtComponent.send(valueSet))
-		// Reject the promise if response contains 'error' property (the call failed).
-		if (result.error)
-			throw new Error(result.error)
-		if (result)
-			return valueSetToObject(result)
+		return this._internalSend({
+			ipc: JSON.stringify(message) + "\n"
+		})
 	}
-	async _sendValueSet(message) {
+
+	// Method used for internal communication between UWP and UWP Background Service (broker process)
+	// through ValueSet class. It does few things.
+	// - Returns promise after the roundtrip to the broker process and back with response.
+	// - Resolves the response (converted from ValueSet to plain JS object).
+	// - Or resolves with undefined if the response is empty
+	// - Or throws if the response contains error ('error' field).
+	async _internalSend(object) {
+		var valueSet = objectToValueSet(object)
+		console.log('_internalSend', object)
+		var response = await wrapUwpPromise(this.connection.sendMessageAsync(valueSet))
+		console.log('response', response)
+		// Reject the promise if response.message contains 'error' property (the call failed).
+		if (response.message.error)
+			throw new Error(response.message.error)
+		else if (response.message.size)
+			return valueSetToObject(response.message)
 	}
 
 	write(buffer) {

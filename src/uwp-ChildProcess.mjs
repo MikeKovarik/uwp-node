@@ -30,6 +30,8 @@ export class ChildProcess extends EventEmitter {
 
 		options.stdio = this._sanitizeStdio(options.stdio)
 		this._prepareStdio(options.stdio)
+		// UWP ValueSet does not accept arrays, so we have to stringify it.
+		options.stdio = options.stdio.join(',')
 		
 		this.stdin  = this.stdio[0] || null
 		this.stdout = this.stdio[1] || null
@@ -47,13 +49,24 @@ export class ChildProcess extends EventEmitter {
 		options.startProcess = options.startProcess || 'spawn'
 
 		// Launch the process.
-		broker.send(options)
+		console.log('launching')
+		broker._internalSend(options)
 			.then(response => {
+				if (!response)
+					throw new Error('uwp-node: broker process response is empty')
 				this.pid = response.pid
+				console.log('LAUNCHED', this.pid)
 				// Attach stdio events listeners and pipes to the broker process.
 				this._attachToBroker()
 			})
 			.catch(err => this.emit('error', err))
+	}
+
+	// WARNING: Node's exec() creates instance of the ChildProcess class but that's unnecesary and expensive.
+	// We only implement the barebone functionality of running the process and returning stdout/stderr in callback/promise.
+	static _exec(options) {
+		options.startProcess = 'exec'
+		return broker._internalSend(options)
 	}
 
 	// TODO
@@ -61,14 +74,14 @@ export class ChildProcess extends EventEmitter {
 		// signal is string like 'SIGHUP'
 		// this.emit(code, signal)
 		this.killed = true
-		// TODO
+		// TODO:
 		this._pipes.forEach(stream => {
-			if (pipe != null) {
+			if (stream != null) {
 				stream.destroy()
 				stream.removeAllListeners()
 			}
 		})
-		broker.removeListener('message', this._onMessage)
+		broker.removeListener('_internalMessage', this._onMessage)
 		this.removeAllListeners()
 	}
 
@@ -184,6 +197,9 @@ export class ChildProcess extends EventEmitter {
 
 	}
 
+	// Attaches current instance (now that we now PID of the remotely created process)
+	// to the uwp-node broker process that notifies us about all of STDIO and custom pipes
+	// though '_internalMessage' event.
 	_attachToBroker() {
 		for (var pipe of this._pipes) {
 			if (!(pipe instanceof Writable)) continue
@@ -193,7 +209,7 @@ export class ChildProcess extends EventEmitter {
 					fd: pipe.fd,
 					data: chunk,
 				}
-				broker.send(options)
+				broker._internalSend(options)
 					.then(() => cb()) // warning: no arg can be passed into cb
 					.catch(err => pipe.emit('error', err))
 			}
@@ -201,7 +217,7 @@ export class ChildProcess extends EventEmitter {
 		
 		var killback = () => broker.removeListener('message', this._onMessage)
 		// TODO: handle the events and killback better.
-		broker.on('message', this._onMessage)
+		broker.on('_internalMessage', this._onMessage)
 		this.once('close', killback)
 		this.once('error', killback)
 	}

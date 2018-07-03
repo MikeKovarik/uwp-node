@@ -41,11 +41,15 @@ namespace UwpNodeBroker {
 		// When UWP app opens.
 		static public event Action opened;
 		// When message from UWP (request) is received
-		static public event Action<ValueSet, ValueSet> message;
+		//static public event Action<ValueSet, ValueSet> message;
+		static public event Func<ValueSet, ValueSet, Task> message;
+
+		static UWP() {
+			Connect();
+		}
 
 		static public async Task Connect() {
-			if (connection != null)
-				return;
+			if (connection != null) return;
 			connection = new AppServiceConnection();
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
@@ -64,9 +68,8 @@ namespace UwpNodeBroker {
 			closed?.Invoke();
 		}
 
-		static void DisposeConnection() {
-			if (connection == null)
-				return;
+		static private void DisposeConnection() {
+			if (connection == null) return;
 			try {
 				connection.Dispose();
 			} finally {
@@ -83,17 +86,27 @@ namespace UwpNodeBroker {
 		}
 
 		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
-			MessageBox.Show("OnRequestReceived"); // TODO: delete
+			//MessageBox.Show("OnRequestReceived"); // TODO: delete
 			var messageDeferral = e.GetDeferral();
 			// Handle message and let registered handlers do whatever's needed.
 			ValueSet req = e.Request.Message;
 			ValueSet res = new ValueSet();
 			try {
-				message?.Invoke(req, res);
+				//message?.Invoke(req, res);
+				if (message != null) {
+					Task[] tasks = message.GetInvocationList()
+						.Select(handler => ((Func<ValueSet, ValueSet, Task>)handler)(req, res))
+						.ToArray();
+					//MessageBox.Show("before await");
+					await Task.WhenAll(tasks);
+					MessageBox.Show("after await");
+				}
 			} catch (Exception err) {
-				res.Add("error", err.ToString());
+				res.Add("OnMessage error", err.ToString());
 			}
+			//MessageBox.Show("responding to UWP");
 			await e.Request.SendResponseAsync(res);
+			//MessageBox.Show("responded to UWP");
 			// Complete the deferral so that the platform knows that we're done responding to the app service call.
 			// Note for error handling: this must be called even if SendResponseAsync() throws an exception.
 			messageDeferral.Complete();
@@ -103,6 +116,8 @@ namespace UwpNodeBroker {
 			if (isConnected)
 				await connection.SendMessageAsync(valueset);
 		}
+
+		static public void Init() { }
 
 	}
 

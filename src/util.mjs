@@ -42,6 +42,21 @@ export function setupChannel(target, channel) {
 	handleStreamJson(channel, object => target.emit('message', object))
 }
 
+// replica of Node's path.join()
+export function joinPath(...segments) {
+	var parts = []
+	var newParts = []
+	segments.forEach(seg => parts.push(...seg.replace(/\//g, '\\').split('\\')))
+	parts
+		.filter(part => part && part !== '.')
+		.forEach(part => {
+			if (part === '..')
+				newParts.pop()
+			else
+				newParts.push(part)
+		})
+	return newParts.join('\\')
+}
 
 // NODE
 

@@ -7,11 +7,11 @@ export default function createApp(broker) {
 	class NodeUwpApp extends EventEmitter {
 
 		constructor() {
+			super()
 			broker.on('opened', () => this.emitLocal('opened'))
 			broker.on('closed', () => this.emitLocal('closed'))
 			broker.on('open', () => this.emitLocal('open'))
 			broker.on('close', () => this.emitLocal('close'))
-			this.pluginConstructor()
 		}
 
 		// Opens the app's window
@@ -42,6 +42,12 @@ export default function createApp(broker) {
 
 	// Wraps uwp-node as a plugin for iso-app module.
 	class NodeUwpAppIsoAppPlugin extends NodeUwpApp {
+
+		constructor() {
+			console.log('NodeUwpAppIsoAppPlugin constructor')
+			super()
+			this.pluginConstructor()
+		}
 
 		pluginConstructor() {
 			if (this._registerNodeEndpoint)

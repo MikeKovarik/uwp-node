@@ -77,6 +77,8 @@ namespace UwpNodeBroker {
 		}
 
 
+		static public void Init() { }
+
 	}
 
 }
