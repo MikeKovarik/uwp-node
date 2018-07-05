@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Threading.Tasks;
 
+
 namespace UwpNodeBroker {
 
 	class NamedPipe {
@@ -27,10 +28,10 @@ namespace UwpNodeBroker {
 		public NamedPipe(string name, int maxInstances = 1) {
 			this.name = name;
 			this.maxInstances = maxInstances;
-			Create();
+			CreateNewPipe();
 		}
 
-		private void Create() {
+		private void CreateNewPipe() {
 			NamedPipeServerStream pipe = null;
 			try {
 				pipe = new NamedPipeServerStream(name, direction, maxInstances, mode, options, chunksize, chunksize);
@@ -49,7 +50,7 @@ namespace UwpNodeBroker {
 			connection?.Invoke();
 			// Start another parallel stream server if needed.
 			if (maxInstances > pipes.Count)
-				Create();
+				CreateNewPipe();
 			StartReading(pipe);
 		});
 
@@ -81,6 +82,7 @@ namespace UwpNodeBroker {
 		private void OnDisconnect(NamedPipeServerStream pipe) {
 			ClosePipe(pipe);
 			end?.Invoke();
+			end = null;
 		}
 
 		private void OnError(NamedPipeServerStream pipe, Exception err) {
@@ -102,6 +104,8 @@ namespace UwpNodeBroker {
 				} catch { }
 				pipe.Dispose();
 			}
+			end?.Invoke();
+			end = null;
 		}
 
 		public async Task Write(string message) {

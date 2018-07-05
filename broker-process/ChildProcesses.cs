@@ -28,128 +28,7 @@ namespace UwpNodeBroker {
 		static ChildProcesses() {
 			UWP.message += OnMessage;
 		}
-
-
-
-
-
-		/*
-		static public Task StartProcess(ValueSet req, ValueSet res) => Task.Run(() => {
-			MessageBox.Show("StartProcess");
-			var proc = new Process();
-			NamedPipe[] procPipes = null;
-			try {
-				var info = proc.StartInfo = new ProcessStartInfo();
-				// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
-				// Or launched and blockingly waited out for exit - cp.exec().
-				var isLongRunning = req["startProcess"] as string == "spawn";
-
-				// Create the process without (visible) window.
-				info.CreateNoWindow = false;
-				info.WindowStyle = ProcessWindowStyle.Hidden;
-				info.UseShellExecute = false;
-				// Request admin access if needed (prompts UAC dialog)
-				//if (req.ContainsKey("admin"))
-				//	info.Verb = "runas";
-
-				// Setup what and where to start
-				info.FileName = req["program"] as string;
-				if (req.ContainsKey("args")) info.Arguments = req["args"] as string;
-				if (req.ContainsKey("cwd")) info.WorkingDirectory = req["cwd"] as string;
-
-				//MessageBox.Show($"{req["cwd"]} {req["program"]}");
-
-				// Pipes need to be created before the node process even starts
-				string[] stdio = getStdio(req);
-
-				// Only long running processes created with spawn() can be communicate asynchronously through custom pipes.
-				procPipes = new NamedPipe[stdio.Length];
-				if (isLongRunning) {
-					// Skip the holy trinity of STDIO (IN/OUT/ERR) and start at custom pipes.
-					int fd = 3;
-					// Few variables used for creation of pipe name.
-					var newProcRandomNum = (new Random()).Next(0, 10000); // NOTE: ideally libuv/node would use win32 handle.
-					var brokerPid = Process.GetCurrentProcess().Id;
-					// Create custom pipes for the other remaining (defined by user) stdio pipes.
-					foreach (var type in stdio.Skip(fd)) {
-						var name = $"${newProcRandomNum}-{fd}-{brokerPid}";
-						var pipe = new NamedPipe(name);
-						pipe.fd = fd;
-						// Handle and report all output and errors of the pipe.
-						pipe.data += (byte[] data) => ReportData(proc, pipe.fd, data);
-						pipe.error += (string err) => ReportError(proc, pipe.fd, err);
-						// Pushing null to stream causes it to close and emit 'end' event.
-						pipe.end += () => ReportData(proc, pipe.fd, null);
-						procPipes[fd] = pipe;
-						fd++;
-					}
-				}
-
-				// Request access to STDIO
-				if (stdio.Length > 0 && stdio[0] != null) info.RedirectStandardInput = true;
-				if (stdio.Length > 1 && stdio[1] != null) info.RedirectStandardOutput = true;
-				if (stdio.Length > 2 && stdio[2] != null) info.RedirectStandardError = true;
-
-				// "spawn" - long running with asynchronous evented STDIO.
-				// "exec"  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
-				if (isLongRunning) {
-					// Handle lifecycle events
-					proc.EnableRaisingEvents = true;
-					proc.Exited += OnExited;
-					proc.Disposed += OnDisposed;
-					// Attach handlers for STDOUT and STDERR
-					// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
-					// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-					if (info.RedirectStandardOutput) proc.OutputDataReceived += (object s, DataReceivedEventArgs e) => ReportData(proc, 1, e.Data);
-					if (info.RedirectStandardError) proc.ErrorDataReceived += (object s, DataReceivedEventArgs e) => ReportData(proc, 2, e.Data);
-					// Start the process and begin receiving data on STDIO streams.
-					proc.Start();
-					if (info.RedirectStandardOutput) proc.BeginOutputReadLine();
-					if (info.RedirectStandardError) proc.BeginErrorReadLine();
-					// Store references to this process.
-					var pid = proc.Id;
-					pipes.Add(pid, procPipes);
-					processes.Add(pid, proc);
-					// Emit event.
-					processStarted?.Invoke(proc);
-					// Tell parent app about the newly spawned process and its PID.
-					res.Add("pid", proc.Id.ToString());
-				} else {
-					// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
-					proc.Start();
-					string stdout = info.RedirectStandardOutput ? proc.StandardOutput.ReadToEnd() : null;
-					string stderr = info.RedirectStandardError ? proc.StandardError.ReadToEnd() : null;
-					if (stdout != null) res.Add("stdout", stdout); // todo
-					if (stderr != null) res.Add("stderr", stderr); // todo
-																   // Synchronously block the task until the process exits.
-					proc.WaitForExit();
-					// Close the process & releases all resources.
-					res.Add("exitCode", proc.ExitCode);
-					//OnExited(proc);
-				}
-
-				MessageBox.Show("StartProcess success end");
-			} catch (Exception err) {
-				MessageBox.Show($"FAIL: {err}");
-
-				// TODO: test and make sure this message still gets sent
-				// becase this methods is not a Task.
-				res.Add("error", err.ToString());
-				// TODO: Investigate and refactor if possible given the OnDisposed event.
-				DisposeProcess(proc);
-				DisposePipes(procPipes);
-
-			}
-		});
-*/
-
-
-
-
-
-
-
-
+		
 		static async Task OnMessage(ValueSet req, ValueSet res) {
 			// Only command without PID is starting a program.
 			if (req.ContainsKey("startProcess")) {
@@ -175,79 +54,28 @@ namespace UwpNodeBroker {
 			}
 		}
 
-
-
-		static public Process fooProc;
-
 		static public Task StartProcess(ValueSet req, ValueSet res) {
-			CancellationTokenSource tokenSource = new CancellationTokenSource();
-			CancellationToken token = tokenSource.Token;
-			return Task.Run(() => {
-				MessageBox.Show("StartProcess");
-				Process proc = new Process();
-				fooProc = proc;
-				NamedPipe[] procPipes = null;
-				try {
-					var info = proc.StartInfo = SetupProcessInfo(req);
-
-					// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
-					// Or launched and blockingly waited out for exit - cp.exec().
-					var isLongRunning = req["startProcess"] as string == "spawn";
-
-					//MessageBox.Show($"{req["cwd"]} {req["program"]}");
-					procPipes = SetupProcessStdio(req, proc, isLongRunning);
-
-					// "spawn" - long running with asynchronous evented STDIO.
-					// "exec"  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
-					if (isLongRunning) {
-						// Handle lifecycle events
-						proc.EnableRaisingEvents = true;
-						proc.Exited += OnExited;
-						proc.Disposed += OnDisposed;
-						// Attach handlers for STDOUT and STDERR
-						// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
-						// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-						if (info.RedirectStandardOutput) proc.OutputDataReceived += (object s, DataReceivedEventArgs e) => ReportData(proc, 1, e.Data);
-						if (info.RedirectStandardError) proc.ErrorDataReceived += (object s, DataReceivedEventArgs e) => ReportData(proc, 2, e.Data);
-						// Start the process and begin receiving data on STDIO streams.
-						proc.Start();
-						if (info.RedirectStandardOutput) proc.BeginOutputReadLine();
-						if (info.RedirectStandardError) proc.BeginErrorReadLine();
-						// Store references to this process.
-						var pid = proc.Id;
-						processes.Add(pid, proc);
-						pipes.Add(proc, procPipes);
-						// Emit event.
-						processStarted?.Invoke(proc);
-						// Tell parent app about the newly spawned process and its PID.
-						res.Add("pid", pid);
-						//MessageBox.Show($"started pid {pid}");
-					} else {
-						// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
-						proc.Start();
-						string stdout = info.RedirectStandardOutput ? proc.StandardOutput.ReadToEnd() : null;
-						string stderr = info.RedirectStandardError ? proc.StandardError.ReadToEnd() : null;
-						if (stdout != null) res.Add("stdout", stdout); // todo
-						if (stderr != null) res.Add("stderr", stderr); // todo
-						// Synchronously block the task until the process exits.
-						proc.WaitForExit();
-						// Close the process & releases all resources.
-						res.Add("exitCode", proc.ExitCode);
-						//OnExited(proc);
-					}
-
-					//MessageBox.Show("StartProcess success end");
-				} catch (Exception err) {
-					MessageBox.Show($"FAIL: {err}");
-					// TODO: test and make sure this message still gets sent
-					// becase this methods is not a Task.
-					res.Add("error", err.ToString());
-					// TODO: Investigate and refactor if possible given the OnDisposed event.
-					DisposeProcess(proc);
-					DisposePipes(procPipes);
-					tokenSource.Cancel();
-				}
-			}, token);
+			//MessageBox.Show("StartProcess");
+			Process proc = new Process();
+			// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
+			// Or launched and blockingly waited out for exit - cp.exec().
+			var isLongRunning = req["startProcess"] as string == "spawn";
+			try {
+				proc.StartInfo = SetupProcessInfo(req);
+				SetupProcessStdio(req, proc, isLongRunning);
+			} catch (Exception err) {
+				HandleError(res, proc, err);
+			}
+			// Start the process.
+			if (isLongRunning) {
+				// Long running with asynchronous evented STDIO.
+				SpawnProcess(res, proc);
+			} else {
+				// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
+				return Task.Run(() => ExecProcess(res, proc));
+			}
+			//MessageBox.Show("StartProcess success end");
+			return null;
 		}
 
 		static private ProcessStartInfo SetupProcessInfo(ValueSet req) {
@@ -271,7 +99,7 @@ namespace UwpNodeBroker {
 			return info;
 		}
 
-		static private string[] GetStdio(ValueSet req) {
+		static private string[] ParseStdio(ValueSet req) {
 			if (req.ContainsKey("stdio")) {
 				string[] stdio = (req["stdio"] as string).Split(',');
 				for (int i = 0; i < stdio.Length; i++) {
@@ -285,14 +113,18 @@ namespace UwpNodeBroker {
 			}
 		}
 
-		static private NamedPipe[] SetupProcessStdio(ValueSet req, Process proc, bool isLongRunning) {
+		static private void SetupProcessStdio(ValueSet req, Process proc, bool isLongRunning) {
 			// Pipes need to be created before the node process even starts
-			string[] stdio = GetStdio(req);
+			string[] stdio = ParseStdio(req);
+
+			// Request access to STDIO
+			if (stdio.Length > 0 && stdio[0] != null) proc.StartInfo.RedirectStandardInput = true;
+			if (stdio.Length > 1 && stdio[1] != null) proc.StartInfo.RedirectStandardOutput = true;
+			if (stdio.Length > 2 && stdio[2] != null) proc.StartInfo.RedirectStandardError = true;
 
 			// Only long running processes created with spawn() can be communicate asynchronously through custom pipes.
-			NamedPipe[] procPipes = null;
 			if (isLongRunning) {
-				procPipes = new NamedPipe[stdio.Length];
+				NamedPipe[] procPipes = new NamedPipe[stdio.Length];
 				// Skip the holy trinity of STDIO (IN/OUT/ERR) and start at custom pipes.
 				int fd = 3;
 				// Few variables used for creation of pipe name.
@@ -311,14 +143,60 @@ namespace UwpNodeBroker {
 					procPipes[fd] = pipe;
 					fd++;
 				}
+				pipes.Add(proc, procPipes);
 			}
+		}
 
-			// Request access to STDIO
-			if (stdio.Length > 0 && stdio[0] != null) proc.StartInfo.RedirectStandardInput = true;
-			if (stdio.Length > 1 && stdio[1] != null) proc.StartInfo.RedirectStandardOutput = true;
-			if (stdio.Length > 2 && stdio[2] != null) proc.StartInfo.RedirectStandardError = true;
+		static public void SpawnProcess(ValueSet res, Process proc) {
+			try {
+				var info = proc.StartInfo;
+				// Handle lifecycle events
+				proc.EnableRaisingEvents = true;
+				proc.Exited += OnExited;
+				proc.Disposed += OnDisposed;
+				// Attach handlers for STDOUT and STDERR
+				// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
+				// where it naturally ends the stream (uses the same 'stream' library from Node's core)
+				if (info.RedirectStandardOutput) proc.OutputDataReceived += (object s, DataReceivedEventArgs e) => ReportData(proc, 1, e.Data);
+				if (info.RedirectStandardError)  proc.ErrorDataReceived  += (object s, DataReceivedEventArgs e) => ReportData(proc, 2, e.Data);
+				// Start the process and begin receiving data on STDIO streams.
+				proc.Start();
+				if (info.RedirectStandardOutput) proc.BeginOutputReadLine();
+				if (info.RedirectStandardError)  proc.BeginErrorReadLine();
+				// Store references to this process and emit processStarted event.
+				Store(proc);
+				// Tell parent app about the newly spawned process and its PID.
+				res.Add("pid", proc.Id);
+				//MessageBox.Show($"spawned pid {proc.Id}");
+			} catch (Exception err) {
+				HandleError(res, proc, err);
+			}
+		}
 
-			return procPipes;
+		static public void ExecProcess(ValueSet res, Process proc) {
+			try {
+				var info = proc.StartInfo;
+				// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
+				proc.Start();
+				Store(proc); // TODO test if this gets called of if Start is blocking as well.
+				if (info.RedirectStandardOutput) res.Add("stdout", proc.StandardOutput.ReadToEnd());
+				if (info.RedirectStandardError)  res.Add("stderr", proc.StandardError.ReadToEnd());
+				// Synchronously block the task until the process exits.
+				proc.WaitForExit();
+				// Close the process & releases all resources.
+				res.Add("exitCode", proc.ExitCode);
+				// Release resources and emit processClosed event.
+				Dispose(proc);
+			} catch (Exception err) {
+				HandleError(res, proc, err);
+			}
+		}
+
+		static private void Store(Process proc) {
+			// Store references to this process.
+			processes.Add(proc.Id, proc);
+			// Emit event.
+			processStarted?.Invoke(proc);
 		}
 
 
@@ -342,16 +220,23 @@ namespace UwpNodeBroker {
 		}
 
 
+		static private void HandleError(ValueSet res, Process proc, Exception err) {
+			MessageBox.Show($"FAIL: {err}");
+			// TODO: test and make sure this message still gets sent
+			// becase this methods is not a Task.
+			res.Add("error", err.ToString());
+			// TODO: Investigate and refactor if possible given the OnDisposed event.
+			Dispose(proc);
+		}
+
 		static private async void OnExited(object sender = null, EventArgs e = null) {
 			Process proc = sender as Process;
-			MessageBox.Show($"OnExited {proc.Id} - {proc.ExitCode}");
+			//MessageBox.Show($"OnExited {proc.Id}: {proc.ExitCode}");
 			ValueSet message = new ValueSet();
 			message.Add("pid", proc.Id);
 			message.Add("exitCode", proc.ExitCode);
 			await UWP.Send(message);
 			Dispose(proc);
-			// Emit event.
-			processClosed?.Invoke();
 		}
 
 		// TODO: this event might lead to simplification in the other dispose methods and how
@@ -370,6 +255,8 @@ namespace UwpNodeBroker {
 			if (proc == null) return;
 			DisposePipes(proc);
 			DisposeProcess(proc);
+			// Emit event.
+			processClosed?.Invoke();
 		}
 
 		// Closes the process & releases all resources held in the launcher.
@@ -425,27 +312,11 @@ namespace UwpNodeBroker {
 			}
 		}
 
-
-		static private async void ReportData(object proc, object data) {
-			ValueSet message = new ValueSet();
-			message.Add("pid", (proc as Process).Id);
-			message.Add("data", data);
-			await UWP.Send(message);
-		}
-
 		static private async void ReportData(object proc, int fd, object data) {
 			ValueSet message = new ValueSet();
 			message.Add("pid", (proc as Process).Id);
 			message.Add("fd", fd);
 			message.Add("data", data);
-			await UWP.Send(message);
-		}
-
-		// todo, is this even used?
-		static private async void ReportError(object proc, object err) {
-			ValueSet message = new ValueSet();
-			message.Add("pid", (proc as Process).Id);
-			message.Add("error", err);
 			await UWP.Send(message);
 		}
 

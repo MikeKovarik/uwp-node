@@ -13,12 +13,14 @@ if (isUwp) {
 	process.env.ComSpec = process.env.ComSpec || 'cmd.exe'
 
 	// https://nodejs.org/api/process.html#process_process_execpath
+	// https://nodejs.org/api/process.html#process_process_cwd
 	// The process.execPath property returns the absolute pathname of the executable that started the Node.js process.
 	// User is expected to include whole node installation within node folder of this app.
 	// Default expected path of the node file is myapp/node/node.exe.
 	var appPackage = Windows.ApplicationModel.Package.current
-	if (!process.execPath)
-		process.execPath = joinPath(appPackage.installedLocation.path, 'node\\node.exe')
+	var appPath = appPackage.installedLocation.path
+	process.execPath = joinPath(appPath, 'node\\node.exe')
+	process.cwd = () => joinPath(appPath, location.pathname.split('/').slice(0, -1).join('/'))
 
 	// shim stdin (no effect)
 	if (!process.stdin) {

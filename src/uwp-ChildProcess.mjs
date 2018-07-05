@@ -9,6 +9,12 @@ const STDIN = 0
 const STDOUT = 1
 const STDERR = 2
 
+// Before v8.0 streams did not have .destroy() method. Browser polyfill might be out of date and miss it too.
+if (Readable.prototype.destroy === undefined)
+	Readable.prototype.destroy = function() {}
+if (Writable.prototype.destroy === undefined)
+	Writable.prototype.destroy = function() {}
+
 //var streams = [process.stdin, process.stdout, process.stderr]
 
 export class ChildProcess extends EventEmitter {
@@ -37,25 +43,21 @@ export class ChildProcess extends EventEmitter {
 		this.stdout = this.stdio[1] || null
 		this.stderr = this.stdio[2] || null
 
-		if (!options.cwd)
-			options.cwd = Windows.ApplicationModel.Package.current.installedLocation.path
-
 		// Extend options to be passed into runtime component but preserve user's options object.
 		options = Object.assign({}, options)
 		options.program = program
 		options.args = args.join(' ')
+		options.cwd = options.cwd || process.cwd()
 		// 'spawn' - long running with asynchronous evented STDIO.
 		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
 		options.startProcess = options.startProcess || 'spawn'
 
 		// Launch the process.
-		console.log('launching')
 		broker._internalSend(options)
 			.then(response => {
 				if (!response)
 					throw new Error('uwp-node: broker process response is empty')
 				this.pid = response.pid
-				console.log('LAUNCHED', this.pid)
 				// Attach stdio events listeners and pipes to the broker process.
 				this._attachToBroker()
 			})
@@ -91,14 +93,16 @@ export class ChildProcess extends EventEmitter {
 		this.exitCode = exitCode
 		if (this.stdin)
 			this.stdin.destroy()
-		if (exitCode < 0) {
-			//var err = errnoException(exitCode, 'spawn') // TODO
-			var err = new Error('Couldnt spawn, exitcode: ' + exitCode) // TODO
-			this.emit('error', err)
-		} else {
-			this.emit('exit', this.exitCode, this.signalCode)
-		}
-		this._maybeClose()
+		setTimeout(() => {
+			if (exitCode < 0) {
+				//var err = errnoException(exitCode, 'spawn') // TODO
+				var err = new Error(`Couldnt spawn, exitcode: ${exitCode}`) // TODO
+				this.emit('error', err)
+			} else {
+				this.emit('exit', this.exitCode, this.signalCode)
+			}
+			this._maybeClose()
+		})
 	}
 
 	_maybeClose() {
@@ -155,9 +159,10 @@ export class ChildProcess extends EventEmitter {
 			// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.
 			this._closesNeeded++
 			stream.fd = fd
-			stream.on('close', () => console.log('stdio closed', fd, 'this._closesNeeded', this._closesNeeded)) // TODO DELETE
-			stream.on('close', () => this._maybeClose(this))
-			//stream.on('error', err => this.emit('error', err)) // TODO: this is an idea. check it out
+			// Broker is only capable of ending the stream (pushing null results in 'end' event)
+			// but we have to take care of emitting 'close' on each stream ourselves.
+			stream.once('end', () => setTimeout(() => stream.emit('close')))
+			stream.once('close', () => this._maybeClose(this))
 			return stream
 		})
 
@@ -170,7 +175,7 @@ export class ChildProcess extends EventEmitter {
 			this.channel = this.stdio[fd]
 			// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
 			// handle and parse incomming data and re-emit it as 'message' events.
-			setupChannel(target, channel)
+			setupChannel(this, this.channel)
 			// IPC channel is integrated into the process object. The stream is not directly available.
 			this.stdio[fd] = null
 		}
@@ -214,8 +219,10 @@ export class ChildProcess extends EventEmitter {
 					.catch(err => pipe.emit('error', err))
 			}
 		}
-		
-		var killback = () => broker.removeListener('message', this._onMessage)
+		var killback = () => {
+			broker.removeListener('message', this._onMessage)
+			setTimeout(() => this.removeAllListeners(), 100)
+		}
 		// TODO: handle the events and killback better.
 		broker.on('_internalMessage', this._onMessage)
 		this.once('close', killback)
