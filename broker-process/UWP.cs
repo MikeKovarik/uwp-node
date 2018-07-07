@@ -21,10 +21,6 @@ namespace UwpNodeBroker {
 		// TODO: handle when the apps reopens but not by this process.
 		//       the app would then go on to create new background process, rather than reconnecting to this one.
 
-		static public string serviceName = "uwp-node";
-		static public string appName = Package.Current.DisplayName;
-		static public string name = $"{serviceName}-{appName}";
-
 		// Connection to UWP app
 		static public AppServiceConnection connection = null;
 
@@ -34,17 +30,28 @@ namespace UwpNodeBroker {
 
 		// Fires when connection to UWP app has been establised.
 		// Either right after launch of the background process, or later on when the app is restarted.
-		static public event Action connected;
+		static public event Action Connected;
 		// Fires when connection to UWP app has been lost.
 		// Usually when the app closes or crashes.
-		static public event Action closed;
+		static public event Action Closed;
 		// When UWP app opens.
-		static public event Action opened;
+		static public event Action Opened;
 		// When message from UWP (request) is received
 		//static public event Action<ValueSet, ValueSet> message;
-		static public event Func<ValueSet, ValueSet, Task> message;
+		static public event Func<ValueSet, ValueSet, Task> Message;
+
+		static public string serviceName = "uwp-node";
+		static public string appName;
+		static public string name;
 
 		static UWP() {
+			try {
+				appName = Package.Current.DisplayName;
+			} catch (Exception err) {
+				Console.WriteLine("started without UWP indentity");
+				appName = "undefined";
+			}
+			name = $"{serviceName}-{appName}";
 			Connect();
 		}
 
@@ -57,7 +64,7 @@ namespace UwpNodeBroker {
 			connection.RequestReceived += OnMessage;
 			AppServiceConnectionStatus status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
-				connected?.Invoke();
+				Connected?.Invoke();
 			} else {
 				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appName}: {status}");
 			}
@@ -65,7 +72,7 @@ namespace UwpNodeBroker {
 
 		static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
 			DisposeConnection();
-			closed?.Invoke();
+			Closed?.Invoke();
 		}
 
 		static private void DisposeConnection() {
@@ -82,7 +89,7 @@ namespace UwpNodeBroker {
 			await appListEntries.First().LaunchAsync();
 			DisposeConnection();
 			await Connect();
-			opened?.Invoke();
+			Opened?.Invoke();
 		}
 
 		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
@@ -91,25 +98,29 @@ namespace UwpNodeBroker {
 			// Handle message and let registered handlers do whatever's needed.
 			ValueSet req = e.Request.Message;
 			ValueSet res = new ValueSet();
-			try {
-				//message?.Invoke(req, res);
-				if (message != null) {
-					Task[] tasks = message.GetInvocationList()
-						.Select(handler => ((Func<ValueSet, ValueSet, Task>)handler)(req, res))
-						.ToArray();
-					//MessageBox.Show("before await");
-					await Task.WhenAll(tasks);
-					MessageBox.Show("after await");
-				}
-			} catch (Exception err) {
-				res.Add("OnMessage error", err.ToString());
-			}
+			await EmitMessage(req, res);
 			//MessageBox.Show("responding to UWP");
 			await e.Request.SendResponseAsync(res);
 			//MessageBox.Show("responded to UWP");
 			// Complete the deferral so that the platform knows that we're done responding to the app service call.
 			// Note for error handling: this must be called even if SendResponseAsync() throws an exception.
 			messageDeferral.Complete();
+		}
+
+		static public async Task EmitMessage(ValueSet req, ValueSet res) {
+			try {
+				if (Message != null) {
+					// Emit Message event and await until handler's tasks are done.
+					Task[] tasks = Message.GetInvocationList()
+						.Select(handler => ((Func<ValueSet, ValueSet, Task>)handler)(req, res))
+						.ToArray();
+					//MessageBox.Show("before await");
+					await Task.WhenAll(tasks);
+					//MessageBox.Show("after await");
+				}
+			} catch (Exception err) {
+				res.Add("OnMessage error", err.ToString());
+			}
 		}
 
 		static public async Task Send(ValueSet valueset) {

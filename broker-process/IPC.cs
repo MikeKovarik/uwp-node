@@ -46,7 +46,7 @@ namespace UwpNodeBroker {
 			// Create one pipe (and allow creation of up to 1000) for communication with children.
 			childIpcPipe = new NamedPipe(UWP.name, 1000);
 			string temp = "";
-			childIpcPipe.data += (byte[] buffer) => {
+			childIpcPipe.Data += (byte[] buffer) => {
 				try {
 					temp += Encoding.UTF8.GetString(buffer);
 					List<string> messages = temp.Split('\n').ToList();

@@ -4,7 +4,6 @@ using System.IO.Pipes;
 using System.Text;
 using System.Threading.Tasks;
 
-
 namespace UwpNodeBroker {
 
 	class NamedPipe {
@@ -12,10 +11,10 @@ namespace UwpNodeBroker {
 		List<NamedPipeServerStream> pipes = new List<NamedPipeServerStream>();
 		List<NamedPipeServerStream> connections = new List<NamedPipeServerStream>();
 
-		public event Action<byte[]> data;
-		public event Action connection;
-		public event Action end;
-		public event Action<string> error;
+		public event Action<byte[]> Data;
+		public event Action Connection;
+		public event Action End;
+		public event Action<string> Error;
 
 		public string name;
 		public int fd;
@@ -43,20 +42,25 @@ namespace UwpNodeBroker {
 		}
 
 		private void StartListening(NamedPipeServerStream pipe) => Task.Factory.StartNew(() => {
+			try {
 			pipe.WaitForConnection();
 			// Client connected to this server.
 			connections.Add(pipe);
 			// Fire connection event.
-			connection?.Invoke();
+				Connection?.Invoke();
 			// Start another parallel stream server if needed.
 			if (maxInstances > pipes.Count)
 				CreateNewPipe();
 			StartReading(pipe);
+			} catch {
+				Console.WriteLine($"Pipe {name} did not start listening");
+				Dispose(pipe);
+			}
 		});
 
 		private Task StartReading(NamedPipeServerStream pipe) => Task.Factory.StartNew(async () => {
 			try {
-				// Serve is ready, start reading
+				// Server is ready, start reading
 				byte[] buffer = new byte[chunksize];
 				while (pipe.CanRead) {
 					if (!pipe.IsConnected) {
@@ -70,7 +74,7 @@ namespace UwpNodeBroker {
 					}
 					byte[] trimmed = new byte[bytesRead];
 					Array.Copy(buffer, trimmed, bytesRead);
-					data?.Invoke(trimmed);
+					Data?.Invoke(trimmed);
 					//MemoryStream trimmed = new MemoryStream();
 					//trimmed.Write(buffer, 0, bytesRead);
 				}
@@ -81,13 +85,13 @@ namespace UwpNodeBroker {
 
 		private void OnDisconnect(NamedPipeServerStream pipe) {
 			ClosePipe(pipe);
-			end?.Invoke();
-			end = null;
+			End?.Invoke();
+			End = null;
 		}
 
 		private void OnError(NamedPipeServerStream pipe, Exception err) {
 			ClosePipe(pipe);
-			error?.Invoke(err.ToString());
+			Error?.Invoke(err.ToString());
 		}
 
 		private void ClosePipe(NamedPipeServerStream pipe) {
@@ -97,16 +101,25 @@ namespace UwpNodeBroker {
 				connections.Remove(pipe);
 		}
 
-		public void Close() {
+		public void Dispose() {
 			foreach (var pipe in pipes) {
+				Dispose(pipe);
+			}
+			End?.Invoke();
+			// Remove references to event handlers.
+			Data = null;
+			Connection = null;
+			End = null;
+			Error = null;
+		}
+		public void Dispose(NamedPipeServerStream pipe) {
+			if (pipe == null)
+				return;
 				try {
 					pipe.Disconnect();
 				} catch { }
 				pipe.Dispose();
 			}
-			end?.Invoke();
-			end = null;
-		}
 
 		public async Task Write(string message) {
 			byte[] buffer = Encoding.UTF8.GetBytes(message);

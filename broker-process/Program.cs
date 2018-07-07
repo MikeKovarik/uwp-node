@@ -9,16 +9,16 @@ using Windows.ApplicationModel;
 
 namespace UwpNodeBroker {
 
-    static class Program {
+	static class Program {
 
 		static Mutex mutex;
 
 		[STAThread]
-        static void Main() {
+		static void Main() {
 			// Get info about UWP app.
-            try {
-                Directory.SetCurrentDirectory(Package.Current.InstalledLocation.Path);
-            } catch { }
+			try {
+				Directory.SetCurrentDirectory(Package.Current.InstalledLocation.Path);
+			} catch { }
 			// Make sure this background pocess only launches in a single instance.
 			if (Mutex.TryOpenExisting(UWP.name, out mutex))
 				StartAsSlave();
@@ -43,24 +43,24 @@ namespace UwpNodeBroker {
 			var slavePipe = new NamedPipe(UWP.name, 100);
 			// Connect to UWP app if we detect new one has been started but it has no means of connecting to
 			// this BG process instance.
-			slavePipe.connection += () => UWP.Connect();
+			slavePipe.Connection += () => UWP.Connect();
 			// Lifecycle & selfclose watchdog.
 			WatchReferences();
 			// Open exclusive mutex to signify that this is the master mutex process for the app.
 			mutex = new Mutex(false, UWP.name);
 			// TODO: is this even needed?
-            Application.EnableVisualStyles();
+			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			// Run blockingly. And release the mutex when the app quits.
-            Application.Run();
+			Application.Run();
 			Close();
 		}
 
 		// Watches state of the UWP app and child processes and kills this broker if possible.
 		static void WatchReferences() {
 			//ChildProcesses.processClosed += () => MessageBox.Show("ChildProcesses.processClosed"); // TODO. this still needs testing
-			UWP.closed += CloseIfPossible;
-			ChildProcesses.processClosed += CloseIfPossible;
+			UWP.Closed += CloseIfPossible;
+			ChildProcesses.Change += CloseIfPossible;
 			// Check every three minutes. Just in case.
 			Task.Run(async () => {
 				while (true) {
@@ -73,7 +73,7 @@ namespace UwpNodeBroker {
 		// Closes the broker if UWP app is closed and no child processes are running.
 		static void CloseIfPossible() {
 			//MessageBox.Show($"CloseIfPossible {UWP.isConnected} {ChildProcesses.processes.Count}"); // TODO remove
-			if (!UWP.isConnected && ChildProcesses.processes.Count == 0)
+			if (!UWP.isConnected && ChildProcesses.Children.Count == 0)
 				Close();
 		}
 		static void Close() {
