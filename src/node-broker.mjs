@@ -20,10 +20,12 @@ if (isNode) {
 			// Creates .send() method that wraps every sent message into \n delimeted JSONs
 			// and unwraps and parses incoming data and exposes it as 'message' event.
 			setupChannel(broker, broker)
+			// TODO: REWORK broker-to-node communication. It should be simple key:value pair
+			// because we'd have to bundle JSON parser in the broker.
 		} catch (err) {
 			throw new Error('Could not connect to uwp-node-broker')
 		}
-
+/*
 		handleStreamJson(broker, event => {
 			switch (event) {
 				//case 'kill':
@@ -41,6 +43,14 @@ if (isNode) {
 			}
 			this.write(JSON.stringify(message) + '\n')
 		}
+*/
+	} else {
+
+		// This code runs in Node.js process that was not spawned by UWP.
+		// There is not broker to connect to but we'll return at leas a dummy EventEmitter
+		// to prevent breaking user's code (during development).
+		broker = new EventEmitter
+		broker.send = () => {}
 
 	}
 

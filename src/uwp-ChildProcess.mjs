@@ -37,7 +37,7 @@ export class ChildProcess extends EventEmitter {
 		options.stdio = this._sanitizeStdio(options.stdio)
 		this._prepareStdio(options.stdio)
 		// UWP ValueSet does not accept arrays, so we have to stringify it.
-		options.stdio = options.stdio.join(',')
+		options.stdio = options.stdio.join('|')
 		
 		this.stdin  = this.stdio[0] || null
 		this.stdout = this.stdio[1] || null
@@ -103,10 +103,19 @@ export class ChildProcess extends EventEmitter {
 			}
 			this._maybeClose()
 		})
+		// NOTE: Race between process and stdio disposal might leave some of the custom stdio pipes left unclosed.
+		// Not really, but just the message of their closure might not have reached JS first before 'exit' event.
+		// We need to close off all remaining pipes.
+		this._pipes.forEach(stream => {
+			// TODO: detect if the stream is closed and close it if not.
+			if (false)
+				stream.push(null)
+		})
 	}
 
 	_maybeClose() {
 		this._closesGot++
+		console.log('_maybeClose', this._closesGot, this._closesNeeded)
 		if (this._closesGot === this._closesNeeded)
 			this.emit('close', this.exitCode, this.signalCode)
 	}

@@ -61,29 +61,25 @@ export function joinPath(...segments) {
 // NODE
 
 export function createNamedPipe(name) {
-	var fullName = getFullPipeName(name)
+	var path = `\\\\.\\pipe\\${name}`
 	var channel = new Socket
-	target.connected = false
+	channel.connected = false
 	var onError = err => {
-		throw new Error(`uwp-node could not connect to pipe '${name}'`)
+		throw new Error(`uwp-node could not connect to pipe '${path}'`)
 	}
 	var onConnect = () => {
-		target.connected = true
+		channel.connected = true
 		channel.removeListener('error', onError)
 	}
 	channel.on('error', onError)
-	channel.connect(fullName, onConnect)
+	channel.connect(path, onConnect)
 	// Create fake fd. Doesn't really do anything.
-	var uselessFd = fs.openSync('\\\\.\\NUL')
+	var uselessFd = fs.openSync('\\\\.\\NUL', 'r')
 	channel.once('close', hadError => {
-		target.connected = false
+		channel.connected = false
 		fs.closeSync(uselessFd)
 	})
 	return channel
-}
-
-export function getFullPipeName(name) {
-	return `\\\\.\\pipe\\uwp-node\\${name}`
 }
 
 

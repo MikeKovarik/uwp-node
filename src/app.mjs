@@ -44,7 +44,6 @@ export default function createApp(broker) {
 	class NodeUwpAppIsoAppPlugin extends NodeUwpApp {
 
 		constructor() {
-			console.log('NodeUwpAppIsoAppPlugin constructor')
 			super()
 			this.pluginConstructor()
 		}

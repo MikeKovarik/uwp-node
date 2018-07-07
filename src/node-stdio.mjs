@@ -5,7 +5,7 @@ import {createNamedPipe} from './util.mjs'
 
 
 if (isNode) {
-
+	
 	var {env} = process
 
 	// Apply parent process PID.
@@ -16,16 +16,12 @@ if (isNode) {
 
 	//var stdio = [process.stdin, process.stdout, process.stderr]
 	var stdio = [null, null, null]
-	var channels = []
-	if (env['uwp-node-stdio']) {
-		var pipeNames = env['uwp-node-stdio'].split(',')
+	if (env['uwp-node-stdio-pipes']) {
+		var pipeNames = env['uwp-node-stdio-pipes'].split('|')
 		// Cleanup the property after to prevent pollution of env vars.
-		delete env['uwp-node-stdio']
-		console.log('## stdio', pipeNames)
-		channels = pipeNames.map(createNamedPipe)
+		delete env['uwp-node-stdio-pipes']
+		stdio.push(...pipeNames.map(createNamedPipe))
 	}
-
-	stdio = stdio.concat(channels)
 
 	// FD of the pipe used for Node style IPC
 	if (env['uwp-node-stdio-ipc']) {
@@ -34,8 +30,9 @@ if (isNode) {
 		delete env['uwp-node-stdio-ipc']
 		// Attach the ipc stream to process, create process.send() method,
 		// start handling incomming data and parsing it as 'message' events.
-		let ipcChannel = channels[fd]
-		setupChannel(process, ipcChannel)
+		let ipcChannel = stdio[fd]
+		if (ipcChannel)
+			setupChannel(process, ipcChannel)
 	}
 
 }
