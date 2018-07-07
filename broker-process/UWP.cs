@@ -111,15 +111,15 @@ namespace UwpNodeBroker {
 			try {
 				if (Message != null) {
 					// Emit Message event and await until handler's tasks are done.
-					Task[] tasks = Message.GetInvocationList()
+					Task[] tasks = Message
+						.GetInvocationList()
 						.Select(handler => ((Func<ValueSet, ValueSet, Task>)handler)(req, res))
+						.Where(task => task != null)
 						.ToArray();
-					//MessageBox.Show("before await");
 					await Task.WhenAll(tasks);
-					//MessageBox.Show("after await");
 				}
 			} catch (Exception err) {
-				res.Add("OnMessage error", err.ToString());
+				res.Add("error", err.ToString());
 			}
 		}
 

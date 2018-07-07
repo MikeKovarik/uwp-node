@@ -18,8 +18,7 @@ module.exports.testerExe = testerExe
 async function checkStaleness() {
 	try {
 		var exeTime = (await fs.stat(testerExe)).mtimeMs
-		//return await checkFolderStaleness(brokerDir, exeTime)
-		return false
+		return await checkFolderStaleness(brokerDir, exeTime)
 			|| await checkFolderStaleness(testerDir, exeTime)
 	} catch(err) {
 		return true
