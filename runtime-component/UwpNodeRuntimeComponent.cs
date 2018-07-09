@@ -15,37 +15,15 @@ namespace UwpNode {
     [AllowForWeb]
     public sealed class UwpNodeRuntimeComponent {
 
-        public AppServiceConnection GetConnection() => connection;
-        AppServiceConnection connection;
-        BackgroundTaskDeferral taskInstanceDeferral = null;
-
-        // Events
-        public event EventHandler<AppServiceConnection> connect;
-        public event EventHandler<object> canceled;
+        public event EventHandler<BackgroundActivatedEventArgs> backgroundactivated;
 
         // Called when fulltrust background process is launched.
         // User has to call this method from their App.cs
         public void OnBackgroundActivated(BackgroundActivatedEventArgs args) {
-            //CoreApplication.MainView.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () => await (new MessageDialog("OnBackgroundActivated")).ShowAsync()); // TODO: delete
-            if (args.TaskInstance.TriggerDetails is AppServiceTriggerDetails details) {
-                // Get task's deferal to enable the Canceled event and prevent immediate termination.
-                taskInstanceDeferral = args.TaskInstance.GetDeferral();
-				// Listen for termination of background task.
-                args.TaskInstance.Canceled += OnTaskCanceled;
-				// Publish the app service of background task.
-                connection = details.AppServiceConnection;
-                connect?.Invoke(null, connection);
-            }
+			// Publish the raw event.
+            backgroundactivated?.Invoke(null, args);
         }
 
-        // Called when background task closes.
-        private void OnTaskCanceled(IBackgroundTaskInstance sender, BackgroundTaskCancellationReason reason) {
-            //CoreApplication.MainView.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () => await (new MessageDialog("OnTaskCanceled")).ShowAsync()); // TODO: delete
-            // Complete the service deferral.
-            if (taskInstanceDeferral != null)
-                taskInstanceDeferral.Complete();
-            canceled?.Invoke(null, null);
-        }
 
     }
 

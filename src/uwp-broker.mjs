@@ -1,16 +1,22 @@
 import {EventEmitter} from 'events'
-import {isUwp, rtComponent} from './util.mjs'
+import {isUwp, isUwpMock} from './util.mjs'
 
 
 export var connection
 export var broker
 
+var rtComponent
+var rtComponentName = 'uwpNode'
 
-if (isUwp) {
+
+if (isUwp || isUwpMock) {
 
 	var {FullTrustProcessLauncher} = Windows.ApplicationModel
 	var {ValueSet} = Windows.Foundation.Collections
 
+	// Grab UWP Runtime Component from window object.
+	if (typeof window !== 'undefined')
+		rtComponent = window[rtComponentName]
 
 	function wrapUwpPromise(iAsyncOperation) {
 		return new Promise((resolve, reject) => iAsyncOperation.done(resolve, reject))
@@ -36,30 +42,82 @@ if (isUwp) {
 		constructor() {
 			super()
 			this.connected = false
-			// TODO: some more filtering between ipc and internal process messages
-			var onMessage = e => {
-				var valueSet = e.request.message
-				console.log('onMessage', valueSet)
-				if (valueSet.ipc)
-					super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
-				else
-					super.emit('_internalMessage', valueSet)
+
+			this._onCanceled = this._onCanceled.bind(this)
+			this._onBackgroundActivated = this._onBackgroundActivated.bind(this)
+			this._onRequestReceived = this._onRequestReceived.bind(this)
+
+			// Newer API's since build 17692 allow listening on the BackgroundActivated event from JS.
+			// Unfortunately it is unstable. If the background fulltrust process crashes or closes, it causes
+			// "An unhandles win32 exception occurred in WWAHost.exe" error and crashes the whole app.
+			var canUseNativeUwpJsApi = typeof Windows !== 'undefined'
+				&& Windows.UI && Windows.UI.WebUI
+				&& Windows.UI.WebUI.WebUIApplication
+				&& 'onbackgroundactivated' in Windows.UI.WebUI.WebUIApplication
+			var attached = false
+			// NOTE: It could fail with "access denied"
+			if (canUseNativeUwpJsApi)
+				attached = this._attachEventSource(Windows.UI.WebUI.WebUIApplication)
+			if (!attached && rtComponent)
+				this._attachEventSource(rtComponent)
+		}
+
+		_attachEventSource(eventSource) {
+			console.log('attaching event source')
+			// Newer API's since build 17692 allow listening on the BackgroundActivated event from JS.
+			// Unfortunately it is unstable. If the background fulltrust process crashes or closes, it causes
+			// "An unhandles win32 exception occurred in WWAHost.exe" error and crashes the whole app.
+			try {
+				// NOTE: This very line can cause throwing UWP "Access Denied" error (if the code runs in WebView within C# shell)
+				eventSource.addEventListener('backgroundactivated', this._onBackgroundActivated)
+				return true
+			} catch(err) {
+				return false
 			}
-			//var onMessage = valueSet => super.emit('message', valueSet)
-			rtComponent.addEventListener('connect', connection => {
-				this.connection = connection
-				this.connection.addEventListener('requestreceived', onMessage)
-				this.connected = true
-				super.emit('connection', this.connection)
-			})
-			rtComponent.addEventListener('canceled', () => {
-				if (this.connection) {
-					this.connection.removeEventListener('requestreceived', onMessage)
-					this.connection = undefined
-				}
-				this.connected = false
-				super.emit('close')
-			})
+		}
+		
+		_onRequestReceived(e) {
+			var valueSet = e.request.message
+			//console.log('_onRequestReceived', valueSet)
+			if (valueSet.ipc)
+				super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
+			else
+				super.emit('_internalMessage', valueSet)
+		}
+		
+		_onBackgroundActivated(e) {
+			//console.log('--- backgroundactivated ---')
+			this.taskInstance = e.taskInstance
+			this.taskInstance.addEventListener('canceled', this._onCanceled)
+			// Needed to keep the process running. Calling .complete() on the deferral will close the background process.
+			this.deferral = this.taskInstance.getDeferral()
+			this.connection = this.taskInstance.triggerDetails.appServiceConnection
+			this.connection.addEventListener('requestreceived', this._onRequestReceived)
+			this.connected = true
+			super.emit('connection', this.connection)
+			super.emit('ready')
+		}
+		
+		_onCanceled() {
+			if (this.taskInstance) {
+				this.taskInstance.removeEventListener('canceled', this._onCanceled)
+				this.taskInstance = undefined
+			}
+			this._completeDeferral()
+			if (this.connection) {
+				this.connection.removeEventListener('requestreceived', this._onRequestReceived)
+				this.connection = undefined
+			}
+			this.connected = false
+			super.emit('close')
+		}
+
+		// Completing deferral closes the background task if it is still running.
+		_completeDeferral() {
+			if (this.deferral) {
+				this.deferral.complete()
+				this.deferral = undefined
+			}
 		}
 
 		async send(message) {
@@ -68,7 +126,7 @@ if (isUwp) {
 				throw new Error(`Cannot connect to uwp-node-broker`)
 			}
 			return this._internalSend({
-				ipc: JSON.stringify(message) + "\n"
+				ipc: JSON.stringify(message) + '\n'
 			})
 		}
 
@@ -79,15 +137,15 @@ if (isUwp) {
 		// - Or resolves with undefined if the response is empty
 		// - Or throws if the response contains error ('error' field).
 		async _internalSend(object) {
+			//console.log('_internalSend', object)
 			var valueSet = objectToValueSet(object)
-			console.log('_internalSend', object)
 			var response = await wrapUwpPromise(this.connection.sendMessageAsync(valueSet))
-			console.log('response', response)
+			var res = response.message
 			// Reject the promise if response.message contains 'error' property (the call failed).
-			if (response.message.error)
-				throw new Error(response.message.error)
-			else if (response.message.size)
-				return valueSetToObject(response.message)
+			if (res.error)
+				throw new Error(res.error)
+			else if (res.size !== 0)
+				return valueSetToObject(res)
 		}
 
 		write(buffer) {
@@ -102,8 +160,12 @@ if (isUwp) {
 			}
 		}
 
-		kill() {
-			this.send('kill')
+		async kill() {
+			// TODO: figure out internal IPC and make the message do something on the broker's side.
+			await this.send('kill')
+			// NOTE: this closes the broker process but does not care if any child is running under the broker.
+			this._completeDeferral()
+			this._onCanceled()
 		}
 
 		start() {return this.launch()}
