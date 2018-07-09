@@ -6,6 +6,7 @@ import createApp from './app.mjs'
 
 var app = isNode ? createApp(broker) : undefined
 export default app
+export {broker}
 
 // NODE NEEDS TO BE ABLE TO
 // - open uwp (because of systray)

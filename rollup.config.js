@@ -39,6 +39,14 @@ export default [
 			format, name, globals,
 		},
 		plugins,
+	}, {
+		external,
+		input: 'src/util.mjs',
+		output: {
+			file: `util.js`,
+			format, name, globals,
+		},
+		plugins,
 	}
 ]
 

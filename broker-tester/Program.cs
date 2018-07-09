@@ -13,42 +13,19 @@ namespace UwpNodeBrokerTester {
 
 	class Program {
 
-		static public event Action<string> Message;
+		static public NamedPipe pipe;
 
 		[STAThread]
 		static void Main() {
 			UWP.Init();
 			IPC.Init();
 			ChildProcesses.Init();
-			HandleMessages();
-			Message += OnMessage;
+
+			UWP.connection = new MockConnection();
+
 			Application.Run();
 		}
 
-		static void HandleMessages() {
-			string temp = "";
-			STD.IN += (byte[] buffer) => {
-				try {
-					temp += Encoding.UTF8.GetString(buffer);
-					List<string> messages = temp.Split('\n').ToList();
-					var incomplete = messages.Last();
-					foreach (string message in messages.Take(messages.Count - 1)) {
-						Message?.Invoke(message);
-					}
-					temp = incomplete;
-				} catch { }
-			};
-		}
-
-		static async void OnMessage(string reqJson) {
-			var req = Converters.JsonToValueSet(reqJson);
-			var res = new ValueSet();
-			await UWP.EmitMessage(req, res);
-			var resJson = Converters.ValueSetToJson(res);
-			STD.Write(resJson + "\n");
-		}
-
 	}
-
 
 }

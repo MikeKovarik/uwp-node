@@ -4,6 +4,7 @@ import {ERR_IPC_CHANNEL_CLOSED, ERR_IPC_DISCONNECTED} from './errors.mjs'
 
 
 export var isUwp = typeof Windows !== 'undefined' && typeof MSApp !== 'undefined'
+export var isUwpMock = typeof Windows !== 'undefined' && typeof MSApp === 'undefined'
 export var isNode = typeof process !== 'undefined' && !!process.versions && !!process.versions.node
 
 export function handleStreamJson(channel, callback) {
@@ -23,20 +24,22 @@ export function handleStreamJson(channel, callback) {
 // Creates .send() method on target that wraps every sent message into \n delimeted JSONs
 // and unwraps and parses incoming data (from channel) and exposes it as 'message' event.
 export function setupChannel(target, channel) {
-	if (target.connected === undefined)
-		target.connected = false
+	Object.defineProperty(target, 'connected', {
+		get: () => channel.connected,
+		set: val => channel.connected = val,
+	})
 	target.channel = channel
 	target.send = object => {
-		if (target.connected)
+		if (channel.connected)
 			channel.write(JSON.stringify(object) + '\n')
 		else
 			target.emit('error', new ERR_IPC_CHANNEL_CLOSED())
 	}
 	target.disconnect = () => {
-		if (!target.connected)
+		if (!channel.connected)
 			return target.emit('error', new ERR_IPC_DISCONNECTED())
 		// Do not allow any new messages to be written.
-		target.connected = false
+		channel.connected = false
 		console.warn('disconnect() not implemented') // TODO
 	}
 	handleStreamJson(channel, object => target.emit('message', object))
@@ -80,14 +83,4 @@ export function createNamedPipe(name) {
 		fs.closeSync(uselessFd)
 	})
 	return channel
-}
-
-
-// UWP
-
-export var rtComponent
-export var rtComponentName = 'uwpNode'
-
-if (isUwp) {
-	rtComponent = window[rtComponentName]
 }

@@ -72,6 +72,8 @@
     <Compile Include="..\broker-process\UWP.cs">
       <Link>UWP.cs</Link>
     </Compile>
+    <Compile Include="Converters.cs" />
+    <Compile Include="MockConnection.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

@@ -22,7 +22,9 @@ namespace UwpNodeBroker {
 		//       the app would then go on to create new background process, rather than reconnecting to this one.
 
 		// Connection to UWP app
-		static public AppServiceConnection connection = null;
+		// NOTE: It has to be dynamic to enable mocking during testing.
+		static public dynamic connection = null;
+		//static public AppServiceConnection connection = null;
 
 		static public bool isConnected {
 			get { return connection != null; }
@@ -42,22 +44,24 @@ namespace UwpNodeBroker {
 
 		static public string serviceName = "uwp-node";
 		static public string appName;
+		static public string appId;
 		static public string name;
 
 		static UWP() {
 			try {
 				appName = Package.Current.DisplayName;
+				appId = Package.Current.Id.Name;
 			} catch (Exception err) {
 				Console.WriteLine("started without UWP indentity");
-				appName = "undefined";
+				appId = "undefined";
 			}
-			name = $"{serviceName}-{appName}";
+			name = $"{serviceName}-{appId}";
 			Connect();
 		}
 
 		static public async Task Connect() {
-			if (connection != null) return;
-			connection = new AppServiceConnection();
+			if (UWP.connection != null) return;
+			AppServiceConnection connection = UWP.connection = new AppServiceConnection();
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
 			connection.ServiceClosed += OnServiceClosed;
@@ -66,7 +70,7 @@ namespace UwpNodeBroker {
 			if (status == AppServiceConnectionStatus.Success) {
 				Connected?.Invoke();
 			} else {
-				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appName}: {status}");
+				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appId}: {status}");
 			}
 		}
 
@@ -76,12 +80,8 @@ namespace UwpNodeBroker {
 		}
 
 		static private void DisposeConnection() {
-			if (connection == null) return;
-			try {
-				connection.Dispose();
-			} finally {
-				connection = null;
-			}
+			connection?.Dispose();
+			connection = null;
 		}
 
 		static public async void OpenApp(object sender = null, EventArgs args = null) {

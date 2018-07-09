@@ -1,4 +1,4 @@
-import {isUwp} from './util.mjs'
+import {isUwp, isUwpMock} from './util.mjs'
 import {ChildProcess} from './uwp-ChildProcess.mjs'
 import {ERR_INVALID_OPT_VALUE, ERR_CHILD_PROCESS_IPC_REQUIRED} from './errors.mjs'
 
@@ -10,7 +10,9 @@ export var execAsAdmin
 export var fork
 export var forkAsAdmin
 
-if (isUwp) {
+
+if (isUwp || isUwpMock) {
+
 
 	function stdioStringToArray(option) {
 		switch (option) {

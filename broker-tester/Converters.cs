@@ -2,7 +2,7 @@
 using Windows.Foundation.Collections;
 using UwpNodeBroker;
 using Newtonsoft.Json.Linq;
-
+using Newtonsoft.Json;
 
 namespace UwpNodeBrokerTester {
 
@@ -66,8 +66,7 @@ namespace UwpNodeBrokerTester {
 					}
 				}
 			}
-			//jo.Add(new JProperty("foo", new JObject()));
-			return jo.ToString();
+			return jo.ToString(Formatting.None);
 		}
 
 	}
