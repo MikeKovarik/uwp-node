@@ -10,17 +10,22 @@ using System.Text;
 using System.Linq;
 
 
+
 namespace UwpNodeBrokerTester {
+
+	class Mock {
+		static public MockAppServiceConnection connection = new MockAppServiceConnection();
+	}
 
 	// NOTE: This isn't exact 1:1 mock of UWP's class. The RequestReceived event is bypassed and handled
 	// in custom manner to simplify code and prevent the necessity to have all handlers dynamic in UWP code.
 	// It leads to tightly coupled mock code, but more efficient production code.
-	class MockConnection {
+	class MockAppServiceConnection {
 
 		private NamedPipe pipe;
 		private string jsonBuffer = "";
 
-		public MockConnection() {
+		public MockAppServiceConnection() {
 			var pipeId = (new Random()).Next(0, 10000);
 			var pipeName = $"uwp-node-broker-tester-{pipeId}";
 			pipe = new NamedPipe(pipeName);
@@ -44,15 +49,9 @@ namespace UwpNodeBrokerTester {
 			//Console.WriteLine($"OnJson {reqJson}");
 			var req = Converters.JsonToValueSet(reqJson);
 			//DebugValueSet(req);
-			var res = new ValueSet();
-			// UWP messages have roundtrip with response that can be delayed. This is not possible
-			// in purely evented IO and we have to sign the messages with some message ID.
-			if (req.ContainsKey("mockReqId")) {
-				res["mockReqId"] = (int)req["mockReqId"];
-			}
-			// Publish the message as if it was from UWP.
-			await UWP.EmitMessage(req, res);
-			await SendMessageAsync(res);
+			var e = new MockAppServiceRequestReceivedEventArgs();
+			e.Request.Message = req;
+			UWP.EmitRequest(null, e);
 		}
 
 		private void DebugValueSet(ValueSet valueset) {
@@ -67,6 +66,7 @@ namespace UwpNodeBrokerTester {
 			//DebugValueSet(valueset);
 			var json = Converters.ValueSetToJson(valueset);
 			await pipe.Write(json + "\n");
+			Console.WriteLine($"SENT {json}");
 			//Console.WriteLine("SENT TO UWP");
 		}
 
@@ -74,6 +74,33 @@ namespace UwpNodeBrokerTester {
 			pipe.Dispose();
 		}
 
+	}
+
+
+	class MockAppServiceDeferral {
+		public void Complete() {}
+	}
+
+
+	class MockAppServiceRequestReceivedEventArgs {
+		public MockAppServiceRequest Request = new MockAppServiceRequest();
+		public object GetDeferral() {
+			return new MockAppServiceDeferral();
+		}
+	}
+
+
+	class MockAppServiceRequest {
+		public ValueSet Message;
+		public async Task SendResponseAsync(ValueSet res) {
+			Console.WriteLine("send response");
+			var req = Message;
+			if (req.ContainsKey("mockReqId")) {
+				res["mockReqId"] = (int)req["mockReqId"];
+			}
+			Mock.connection.SendMessageAsync(res);
+			// TODO: send
+		}
 	}
 
 }

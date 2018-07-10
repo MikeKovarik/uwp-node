@@ -40,7 +40,7 @@ namespace UwpNodeBroker {
 		static public event Action Opened;
 		// When message from UWP (request) is received
 		//static public event Action<ValueSet, ValueSet> message;
-		static public event Func<ValueSet, ValueSet, Task> Message;
+		static public event Action<object> Request;
 
 		static public string serviceName = "uwp-node";
 		static public string appName;
@@ -65,7 +65,7 @@ namespace UwpNodeBroker {
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
 			connection.ServiceClosed += OnServiceClosed;
-			connection.RequestReceived += OnMessage;
+			connection.RequestReceived += EmitRequest;
 			AppServiceConnectionStatus status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
 				Connected?.Invoke();
@@ -73,6 +73,11 @@ namespace UwpNodeBroker {
 				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appId}: {status}");
 			}
 		}
+
+		// Actual method.
+		static public void EmitRequest(object s, AppServiceClosedEventArgs e) => Request?.Invoke(e);
+		// This one is needed for mocking and testing.
+		static public void EmitRequest(object s, dynamic e) => Request?.Invoke(e);
 
 		static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
 			DisposeConnection();
@@ -84,43 +89,12 @@ namespace UwpNodeBroker {
 			connection = null;
 		}
 
-		static public async void OpenApp(object sender = null, EventArgs args = null) {
+		static public async void OpenApp(object s = null, EventArgs args = null) {
 			IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
 			await appListEntries.First().LaunchAsync();
 			DisposeConnection();
 			await Connect();
 			Opened?.Invoke();
-		}
-
-		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
-			//MessageBox.Show("OnRequestReceived"); // TODO: delete
-			var messageDeferral = e.GetDeferral();
-			// Handle message and let registered handlers do whatever's needed.
-			ValueSet req = e.Request.Message;
-			ValueSet res = new ValueSet();
-			await EmitMessage(req, res);
-			//MessageBox.Show("responding to UWP");
-			await e.Request.SendResponseAsync(res);
-			//MessageBox.Show("responded to UWP");
-			// Complete the deferral so that the platform knows that we're done responding to the app service call.
-			// Note for error handling: this must be called even if SendResponseAsync() throws an exception.
-			messageDeferral.Complete();
-		}
-
-		static public async Task EmitMessage(ValueSet req, ValueSet res) {
-			try {
-				if (Message != null) {
-					// Emit Message event and await until handler's tasks are done.
-					Task[] tasks = Message
-						.GetInvocationList()
-						.Select(handler => ((Func<ValueSet, ValueSet, Task>)handler)(req, res))
-						.Where(task => task != null)
-						.ToArray();
-					await Task.WhenAll(tasks);
-				}
-			} catch (Exception err) {
-				res.Add("error", err.ToString());
-			}
 		}
 
 		static public async Task Send(ValueSet valueset) {

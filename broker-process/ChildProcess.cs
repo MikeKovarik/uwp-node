@@ -21,18 +21,19 @@ namespace UwpNodeBroker {
 		private string[] stdio = new string[0];
 
 		public int Pid;
-		public Task Ready;
+		public Task Started;
 		public event Action Disposed;
+		public Task IpcReady = new Task(() => { });
 
 
 		public ChildProcess(ValueSet req, ValueSet res) {
 			this.req = req;
 			this.res = res;
-			Ready = StartProcess();
+			Started = StartProcess();
 		}
 
 		private async Task StartProcess() {
-			//MessageBox.Show("StartProcess");
+			//Console.WriteLine("StartProcess");
 			proc = new Process();
 			// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
 			// Or launched and blockingly waited out for exit - cp.exec().
@@ -141,7 +142,7 @@ namespace UwpNodeBroker {
 				// Tell parent app about the newly spawned process and its PID.
 				Pid = proc.Id;
 				res.Add("pid", Pid);
-				//MessageBox.Show($"spawned pid {Pid}");
+				//Console.WriteLine($"spawned pid {Pid}");
 			} catch (Exception err) {
 				HandleError(err);
 			}
@@ -167,7 +168,7 @@ namespace UwpNodeBroker {
 		}
 
 		private void HandleError(Exception err) {
-			MessageBox.Show($"FAIL: {err}");
+			//Console.WriteLine($"FAIL: {err}");
 			res.Add("error", err.ToString());
 			Dispose();
 		}
@@ -195,7 +196,7 @@ namespace UwpNodeBroker {
 			message.Add("pid", Pid);
 			message.Add("fd", fd);
 			message.Add("data", data);
-			await UWP.Send(message);
+			await Report(message);
 		}
 
 		private async void ReportError(object err, int fd) {
@@ -203,6 +204,12 @@ namespace UwpNodeBroker {
 			message.Add("pid", Pid);
 			message.Add("fd", fd);
 			message.Add("error", err);
+			await Report(message);
+		}
+
+		private async Task Report(ValueSet message) {
+			if (!IpcReady.IsCompleted)
+				await IpcReady;
 			await UWP.Send(message);
 		}
 
@@ -215,15 +222,14 @@ namespace UwpNodeBroker {
 			ValueSet message = new ValueSet();
 			message.Add("pid", Pid);
 			message.Add("exitCode", proc.ExitCode);
-			await UWP.Send(message);
+			//Console.WriteLine($"EXITED {Pid} {proc.ExitCode}");
+			await Report(message);
 			Dispose();
 		}
 
-		private void OnDisposed(object sender = null, EventArgs e = null) {
-			// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
-			// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
-			Dispose();
-		}
+		// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
+		// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
+		private void OnDisposed(object sender = null, object e = null) => Dispose();
 
 		///////////////////////////////////////////////////////////////////////
 		// DISPOSE
@@ -242,8 +248,7 @@ namespace UwpNodeBroker {
 			} catch { }
 			if (pipes != null) {
 				foreach (NamedPipe pipe in pipes) {
-					if (pipe != null)
-						pipe.Dispose();
+					pipe?.Dispose();
 				}
 			}
 			Disposed?.Invoke();
