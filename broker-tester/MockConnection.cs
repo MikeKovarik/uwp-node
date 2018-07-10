@@ -52,7 +52,6 @@ namespace UwpNodeBrokerTester {
 			}
 			// Publish the message as if it was from UWP.
 			await UWP.EmitMessage(req, res);
-			//Console.WriteLine("AWAITED");
 			await SendMessageAsync(res);
 		}
 
@@ -65,6 +64,7 @@ namespace UwpNodeBrokerTester {
 		}
 
 		public async Task SendMessageAsync(ValueSet valueset) {
+			//DebugValueSet(valueset);
 			var json = Converters.ValueSetToJson(valueset);
 			await pipe.Write(json + "\n");
 			//Console.WriteLine("SENT TO UWP");

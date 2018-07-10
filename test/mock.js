@@ -19,7 +19,7 @@ process.on('uncaughtException', err => {
 
 describe('uwp-node UWP mocked in console', function() {
 
-	this.timeout(10 * 1000)
+	this.timeout(5 * 1000)
 	before(async () => {
 		await compileIfNeeded()
 		await mockUwp()
@@ -27,6 +27,7 @@ describe('uwp-node UWP mocked in console', function() {
 
 	after(() => {
 		broker.kill()
+		broker.connection.proc.kill()
 	})
 
 	require('./testCases.js')

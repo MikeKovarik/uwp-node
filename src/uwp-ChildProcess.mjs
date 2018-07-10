@@ -33,6 +33,7 @@ export class ChildProcess extends EventEmitter {
 		this.killed = false
 
 		this._onMessage = this._onMessage.bind(this)
+		this._killback = this._killback.bind(this)
 
 		options.stdio = this._sanitizeStdio(options.stdio)
 		this._prepareStdio(options.stdio)
@@ -52,12 +53,16 @@ export class ChildProcess extends EventEmitter {
 		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
 		options.startProcess = options.startProcess || 'spawn'
 
+		this.once('close', this._killback)
+		this.once('error', this._killback)
+
 		// Launch the process.
 		broker._internalSend(options)
-			.then(response => {
-				if (!response)
+			.then(res => {
+				//console.log('> spawn res', res)
+				if (!res)
 					throw new Error('uwp-node: broker process response is empty')
-				this.pid = response.pid
+				this.pid = res.pid
 				// Attach stdio events listeners and pipes to the broker process.
 				this._attachToBroker()
 			})
@@ -73,18 +78,21 @@ export class ChildProcess extends EventEmitter {
 
 	// TODO
 	kill(signal) {
-		// signal is string like 'SIGHUP'
-		// this.emit(code, signal)
 		this.killed = true
-		// TODO:
 		this._pipes.forEach(stream => {
 			if (stream != null) {
 				stream.destroy()
 				stream.removeAllListeners()
 			}
 		})
+		this._killback()
+	}
+
+	_killback() {
 		broker.removeListener('_internalMessage', this._onMessage)
-		this.removeAllListeners()
+		this.once('close', this._killback)
+		this.once('error', this._killback)
+		setTimeout(() => this.removeAllListeners(), 200)
 	}
 
 	_onExit(exitCode, signalCode) {
@@ -101,21 +109,30 @@ export class ChildProcess extends EventEmitter {
 			} else {
 				this.emit('exit', this.exitCode, this.signalCode)
 			}
+			this._flushStdio()
 			this._maybeClose()
+			// NOTE: Race between process and stdio disposal might leave some of the custom stdio pipes left unclosed.
+			// Not really, but just the message of their closure might not have reached JS first before 'exit' event.
+			// We need to close off all remaining pipes.
+			this._forceCloseStdio()
 		})
-		// NOTE: Race between process and stdio disposal might leave some of the custom stdio pipes left unclosed.
-		// Not really, but just the message of their closure might not have reached JS first before 'exit' event.
-		// We need to close off all remaining pipes.
-		this._pipes.forEach(stream => {
-			// TODO: detect if the stream is closed and close it if not.
-			if (false)
-				stream.push(null)
-		})
+	}
+
+	_flushStdio() {
+		this._pipes
+			.filter(stream => stream.readable && !stream._readableState.readableListening)
+			.forEach(stream => stream.resume())
+	}
+
+	_forceCloseStdio() {
+		this._pipes
+			.filter(stream => stream.readable && !stream._readableState.ended)
+			.forEach(stream => stream.push(null))
 	}
 
 	_maybeClose() {
 		this._closesGot++
-		console.log('_maybeClose', this._closesGot, this._closesNeeded)
+		//console.log('_maybeClose', this._closesGot, this._closesNeeded)
 		if (this._closesGot === this._closesNeeded)
 			this.emit('close', this.exitCode, this.signalCode)
 	}
@@ -171,7 +188,7 @@ export class ChildProcess extends EventEmitter {
 			// Broker is only capable of ending the stream (pushing null results in 'end' event)
 			// but we have to take care of emitting 'close' on each stream ourselves.
 			stream.once('end', () => setTimeout(() => stream.emit('close')))
-			stream.once('close', () => this._maybeClose(this))
+			stream.once('close', () => this._maybeClose())
 			return stream
 		})
 
@@ -228,23 +245,19 @@ export class ChildProcess extends EventEmitter {
 					.catch(err => pipe.emit('error', err))
 			}
 		}
-		var killback = () => {
-			broker.removeListener('message', this._onMessage)
-			setTimeout(() => this.removeAllListeners(), 100)
-		}
-		// TODO: handle the events and killback better.
 		broker.on('_internalMessage', this._onMessage)
-		this.once('close', killback)
-		this.once('error', killback)
 	}
 
 	_onMessage(res) {
+		//console.log('_onMessage', res)
 		// Only accept messages with PID of this process.
 		if (res.pid !== this.pid) return
-		if (res.exitCode) this._onExit(res.exitCode)
+		if (res.exitCode !== undefined) this._onExit(res.exitCode)
 		if (res.fd !== undefined) {
 			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
 			var pipe = this._pipes[res.fd]
+			if (!pipe.readable) return
+			if (pipe._readableState.ended) return
 			if (res.data === null) {
 				// Underlying C# stream ended and sent null. Now we need to close the JS stream.
 				pipe.push(null)

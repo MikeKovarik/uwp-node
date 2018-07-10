@@ -58,8 +58,8 @@ namespace UwpNodeBroker {
 		private void SetupInfo() {
 			proc.StartInfo = info = new ProcessStartInfo();
 			// Create the process without (visible) window.
-			info.CreateNoWindow = false;
 			info.WindowStyle = ProcessWindowStyle.Hidden;
+			info.CreateNoWindow = true;
 			info.UseShellExecute = false;
 			// Request admin access if needed (prompts UAC dialog)
 			//if (req.ContainsKey("admin"))

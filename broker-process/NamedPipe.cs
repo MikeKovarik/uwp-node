@@ -53,7 +53,7 @@ namespace UwpNodeBroker {
 				CreateNewPipe();
 			StartReading(pipe);
 			} catch {
-				Console.WriteLine($"Pipe {name} did not start listening");
+				//Console.WriteLine($"Pipe {name} did not start listening");
 				Dispose(pipe);
 			}
 		});
