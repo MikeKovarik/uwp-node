@@ -16,6 +16,6 @@ process.on('uncaughtException', err => {
 
 describe('uwp-node native testbench', function() {
 
-	require('./testCases.js')
+	require('./tests.js')
 
 })

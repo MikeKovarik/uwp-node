@@ -78,7 +78,7 @@ class AppServiceConnection extends EventTarget {
 			req.mockReqId = Math.floor(Math.random() * 100000)
 			var responseFinder = message => {
 				if (message.mockReqId === req.mockReqId) {
-					this.proc.removeListener('message', responseFinder)
+					this.removeListener('_response', responseFinder)
 					delete message.mockReqId
 					resolve({message})
 				}

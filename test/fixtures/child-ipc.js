@@ -1,5 +1,0 @@
-require('../node.js')
-console.log('process.connected', process.connected)
-console.log('process.channel', typeof process.channel)
-console.log('process.send', typeof process.send)
-console.log('process.disconnect', typeof process.disconnect)

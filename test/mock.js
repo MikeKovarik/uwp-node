@@ -30,6 +30,6 @@ describe('uwp-node UWP mocked in console', function() {
 		broker.connection.proc.kill()
 	})
 
-	require('./testCases.js')
+	require('./tests.js')
 
 })

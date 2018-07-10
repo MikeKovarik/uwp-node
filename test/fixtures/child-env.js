@@ -1,2 +1,2 @@
-require('../node.js')
-console.log(process.env)
+require('../../node.js')
+console.log(JSON.stringify(process.env))

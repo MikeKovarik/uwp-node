@@ -37,16 +37,17 @@ function startNode() {
 		log('NODE ipc message:', message)
 	})
 
-	node.on('exit', (code, signal) => {
-		log(`NODE exit: child process exited with code ${code}, ${signal}`)
-	})
-
-	node.on('close', (code, signal) => {
-		log(`NODE close: all child process stdio streams have been closed, exitcode ${code}, signal ${signal}`)
-	})
-
 	node.on('error', error => {
 		log('NODE error:', error)
 	})
 
+	node.once('exit', (code, signal) => {
+		log(`NODE exit: child process exited with code ${code}, ${signal}`)
+	})
+
+	node.once('close', (code, signal) => {
+		log(`NODE close: all child process stdio streams have been closed, exitcode ${code}, signal ${signal}`)
+	})
+
+	return new Promise(resolve => node.once('exit', resolve))
 }
