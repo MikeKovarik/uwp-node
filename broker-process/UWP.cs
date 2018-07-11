@@ -40,7 +40,7 @@ namespace UwpNodeBroker {
 		static public event Action Opened;
 		// When message from UWP (request) is received
 		//static public event Action<ValueSet, ValueSet> message;
-		static public event Action<object> Request;
+		static public event Action<ValueSet> Message;
 
 		static public string serviceName = "uwp-node";
 		static public string appName;
@@ -65,7 +65,7 @@ namespace UwpNodeBroker {
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
 			connection.ServiceClosed += OnServiceClosed;
-			connection.RequestReceived += EmitRequest;
+			connection.RequestReceived += OnMessage;
 			AppServiceConnectionStatus status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
 				Connected?.Invoke();
@@ -73,11 +73,6 @@ namespace UwpNodeBroker {
 				MessageBox.Show($"Failed to connect {serviceName} background process to UWP App {appId}: {status}");
 			}
 		}
-
-		// Actual method.
-		static public void EmitRequest(object s, AppServiceClosedEventArgs e) => Request?.Invoke(e);
-		// This one is needed for mocking and testing.
-		static public void EmitRequest(object s, dynamic e) => Request?.Invoke(e);
 
 		static private void OnServiceClosed(AppServiceConnection sender, AppServiceClosedEventArgs args) {
 			DisposeConnection();
@@ -89,12 +84,30 @@ namespace UwpNodeBroker {
 			connection = null;
 		}
 
-		static public async void OpenApp(object s = null, EventArgs args = null) {
+		static public async void OpenApp(object sender = null, EventArgs args = null) {
 			IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
 			await appListEntries.First().LaunchAsync();
 			DisposeConnection();
 			await Connect();
 			Opened?.Invoke();
+		}
+
+		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
+			//MessageBox.Show("OnRequestReceived"); // TODO: delete
+			//var messageDeferral = e.GetDeferral();
+			// Handle message and let registered handlers do whatever's needed.
+			await EmitMessage(e.Request.Message);
+			//messageDeferral.Complete();
+		}
+
+		static public async Task EmitMessage(ValueSet message) {
+			try {
+				Message?.Invoke(message);
+			} catch (Exception err) {
+				var vs = new ValueSet();
+				vs.Add("error", err.ToString());
+				await Send(vs);
+			}
 		}
 
 		static public async Task Send(ValueSet valueset) {

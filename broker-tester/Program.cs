@@ -21,7 +21,7 @@ namespace UwpNodeBrokerTester {
 			IPC.Init();
 			ChildProcesses.Init();
 
-			UWP.connection = Mock.connection;
+			UWP.connection = new MockAppServiceConnection();
 
 			Application.Run();
 		}

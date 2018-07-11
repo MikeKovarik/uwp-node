@@ -51,8 +51,8 @@ export default function createApp(broker) {
 		pluginConstructor() {
 			if (this._registerNodeEndpoint)
 				this._registerNodeEndpoint(broker)
-			else
-				console.warn('could not plug uwp-node into iso-app because ipc plugin is missing.')
+			//else
+			//	console.warn('could not plug uwp-node into iso-app because ipc plugin is missing.')
 		}
 
 		launchUwpNodeBroker() {

@@ -71,6 +71,8 @@ if (isUwp || isUwpMock) {
 			callback = options
 			options = {}
 		}
+		// TODO: revert back to instantiating ChildProcess.
+		options.startProcess = 'exec'
 		options.shell = options.shell || 'cmd.exe'
 
 		var promise = ChildProcess._exec(options)

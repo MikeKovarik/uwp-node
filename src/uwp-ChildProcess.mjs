@@ -17,14 +17,33 @@ if (Writable.prototype.destroy === undefined)
 
 //var streams = [process.stdin, process.stdout, process.stderr]
 
+var processes = []
+function generateCid() {
+	return Math.round(Math.random() * 100000)
+}
+
 export class ChildProcess extends EventEmitter {
 
 	constructor(program, args = [], options = {}) {
 		super()
 
+		// Custom ID (not to be mistaked with PID = Process ID managed by system).
+		// It is used to mark outgoing and incomming IPC messaging to/from broker process that takes care
+		// of actually running the process. It's needed to be able to accept initial info and state (or error)
+		// of the process before it launches and is assigned PID.
+		var currentCids = processes.map(cp => cp.cid)
+		this.cid = generateCid()
+		while (currentCids.includes(this.cid)) this.cid = generateCid()
+		// Keep track of running instances.
+		processes.push(this)
+
+		// Process is started in background broker
 		if (!broker.connected)
 			throw new Error(`child process ${program} could not be spawned because uwp-node-broker process is not running.`)
 
+		// Each created stdio pipe/stream increments _closesNeeded counter.
+		// Each time 'close' is emitted on stdio or 'exit' is emitted on process the _closesGot increments.
+		// When these two are equal, 'close' event is emitted on process and it is then disposed.
 		this._closesNeeded = 1
 		this._closesGot = 0
 
@@ -33,7 +52,8 @@ export class ChildProcess extends EventEmitter {
 		this.killed = false
 
 		this._onMessage = this._onMessage.bind(this)
-		this._killback = this._killback.bind(this)
+		this._onSetupMessage = this._onSetupMessage.bind(this)
+		this._destroy = this._destroy.bind(this)
 
 		options.stdio = this._sanitizeStdio(options.stdio)
 		this._prepareStdio(options.stdio)
@@ -53,54 +73,131 @@ export class ChildProcess extends EventEmitter {
 		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
 		options.startProcess = options.startProcess || 'spawn'
 
-		this.once('close', this._killback)
-		this.once('error', this._killback)
+		// Desotroy all pipes, resources, and listeners when the process closes or errors.
+		// NOTE: C# broker should take care of disposing and releasing its resources, so there
+		//       is no need to call kill() from here, once the process closes.
+		this.once('close', this._destroy)
+		this.once('error', this._destroy)
 
 		// Launch the process.
+		options.cid = this.cid
 		broker._internalSend(options)
-			.then(res => {
-				//console.log('> spawn res', res)
-				if (!res)
-					throw new Error('uwp-node: broker process response is empty')
+		broker.on('internalMessage', this._onSetupMessage)
+	}
+
+	_onSetupMessage(res) {
+		//console.log('_onSetupMessage()', this.cid, res)
+		if (res.cid === this.cid) {
+			if (res.error) {
+				this._onError(res.error)
+			} else if (res.pid !== undefined) {
+				// Broker finally started the process and sent us this first message with PID.
+				// There are more to come, they will be marked with CID (not PID).
+				// Now we need to setup everything
+				broker.removeListener('internalMessage', this._onSetupMessage)
 				this.pid = res.pid
 				// Attach stdio events listeners and pipes to the broker process.
 				this._attachToBroker()
-			})
-			.catch(err => this.emit('error', err))
+			}
+		}
 	}
 
-	// WARNING: Node's exec() creates instance of the ChildProcess class but that's unnecesary and expensive.
-	// We only implement the barebone functionality of running the process and returning stdout/stderr in callback/promise.
-	static _exec(options) {
-		options.startProcess = 'exec'
-		return broker._internalSend(options)
+	// Attaches current instance (now that we now PID of the remotely created process)
+	// to the uwp-node broker process that notifies us about all of STDIO and custom pipes
+	// though 'internalMessage' event.
+	_attachToBroker() {
+		//console.log('----------------------------------------------------------------')
+		//console.log('_attachToBroker()', this.cid)
+		//console.log('----------------------------------------------------------------')
+		for (var pipe of this._pipes) {
+			if (!(pipe instanceof Writable)) continue
+			pipe._write = (chunk, encoding, cb) => {
+				var req = {
+					cid: this.cid,
+					fd: pipe.fd,
+					data: chunk,
+				}
+				broker._internalSend(req).then(cb)
+			}
+		}
+		broker.on('internalMessage', this._onMessage)
+	}
+
+	_onMessage(res) {
+		//console.log('_onMessage()', this.cid, res)
+		// Only accept messages with matching Custom Id of this process.
+		if (res.cid !== this.cid) return
+		if (res.exitCode !== undefined) this._onExit(res.exitCode)
+		if (res.fd !== undefined) {
+			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
+			var pipe = this._pipes[res.fd]
+			if (!pipe.readable) return
+			if (pipe._readableState.ended) return
+			if (res.pid !== null) this.pid = res.pid
+			if (res.data === null) {
+				// Underlying C# stream ended and sent null. Now we need to close the JS stream.
+				pipe.push(null)
+			} else if (res.data !== undefined) {
+				// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
+				// But we have to make it a Buffer ourselves (to make it use the U8A memory, instead of copying).
+				// Also works when we receive string instead of bytes.
+				pipe.push(Buffer.from(res.data))
+			}
+			// Emit error on the stream given by fd.
+			if (res.error) pipe.emit('error', res.error)
+		} else {
+			// Emit bigass error on the process object. Something gone very wrong.
+			if (res.error) this._onError(res.error)
+		}
+	}
+
+	_onError(err) {
+		this.emit('error', err) // wrap error in Error instance?
+		// TODO: emit 'close' and cleanup.
+		// TODO: throw the error if there are no 'error' event handlers.
 	}
 
 	// TODO
-	kill(signal) {
-		this.killed = true
-		this._pipes.forEach(stream => {
-			if (stream != null) {
-				stream.destroy()
-				stream.removeAllListeners()
-			}
+	async kill(signal) {
+		return
+		// TODO: properly test if this actually kills the process in broker and release all resources
+		//       (if its removed from the list of running processes).
+		//       This may need internal uwp-node IPC system to work before it can be done.
+		await broker._internalSend({
+			cid: this.cid,
+			kill: true,
 		})
-		this._killback()
+		// TODO: set killed to true once it really is killed.
+		this.killed = true
+		this._destroy()
 	}
 
-	_killback() {
-		broker.removeListener('_internalMessage', this._onMessage)
-		this.once('close', this._killback)
-		this.once('error', this._killback)
-		setTimeout(() => this.removeAllListeners(), 200)
+	_destroy() {
+		//console.log('################################################################')
+		//console.log('_destroy', this.cid)
+		//console.log('################################################################')
+		broker.removeListener('internalMessage', this._onMessage)
+		broker.removeListener('internalMessage', this._onSetupMessage)
+		this.once('close', this._destroy)
+		this.once('error', this._destroy)
+		if (this.stdin)
+			this.stdin.destroy()
+		// Give broker the last second to finish transmitting before all listeners and pipes are destroyed.
+		setTimeout(() => {
+			this.removeAllListeners()
+			this._pipes.forEach(stream => {
+				if (stream != null) {
+					stream.destroy()
+					stream.removeAllListeners()
+				}
+			})
+		}, 1000)
 	}
 
 	_onExit(exitCode, signalCode) {
 		if (signalCode)
 			this.signalCode = signalCode
 		this.exitCode = exitCode
-		if (this.stdin)
-			this.stdin.destroy()
 		setTimeout(() => {
 			if (exitCode < 0) {
 				//var err = errnoException(exitCode, 'spawn') // TODO
@@ -226,53 +323,6 @@ export class ChildProcess extends EventEmitter {
 				targetStream.pipe(stdioStream)
 		}
 
-	}
-
-	// Attaches current instance (now that we now PID of the remotely created process)
-	// to the uwp-node broker process that notifies us about all of STDIO and custom pipes
-	// though '_internalMessage' event.
-	_attachToBroker() {
-		for (var pipe of this._pipes) {
-			if (!(pipe instanceof Writable)) continue
-			pipe._write = (chunk, encoding, cb) => {
-				var options = {
-					pid: this.pid,
-					fd: pipe.fd,
-					data: chunk,
-				}
-				broker._internalSend(options)
-					.then(() => cb()) // warning: no arg can be passed into cb
-					.catch(err => pipe.emit('error', err))
-			}
-		}
-		broker.on('_internalMessage', this._onMessage)
-	}
-
-	_onMessage(res) {
-		//console.log('_onMessage', res)
-		// Only accept messages with PID of this process.
-		if (res.pid !== this.pid) return
-		if (res.exitCode !== undefined) this._onExit(res.exitCode)
-		if (res.fd !== undefined) {
-			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
-			var pipe = this._pipes[res.fd]
-			if (!pipe.readable) return
-			if (pipe._readableState.ended) return
-			if (res.data === null) {
-				// Underlying C# stream ended and sent null. Now we need to close the JS stream.
-				pipe.push(null)
-			} else if (res.data !== undefined) {
-				// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
-				// But we have to make it a Buffer ourselves (to make it use the U8A memory, instead of copying).
-				// Also works when we receive string instead of bytes.
-				pipe.push(Buffer.from(res.data))
-			}
-			// Emit error on the stream given by fd.
-			if (res.error) pipe.emit('error', res.error)
-		} else {
-			// Emit bigass error on the process object. Something gone very wrong.
-			if (res.error) this.emit('error', res.error)
-		}
 	}
 
 	//connected, disconnect() and send() are implemented by setupChannel()

@@ -14,27 +14,22 @@ namespace UwpNodeBroker {
 	class ChildProcess {
 
 		private ValueSet req;
-		private ValueSet res;
-		private Process proc;
-		private ProcessStartInfo info;
-		private NamedPipe[] pipes;
-		private string[] stdio = new string[0];
+		private Process Proc;
+		private ProcessStartInfo Info;
+		private NamedPipe[] Pipes;
+		private string[] Stdio = new string[0];
 
 		public int Pid;
-		public Task Started;
+		public int Cid;
 		public event Action Disposed;
-		public Task IpcReady = new Task(() => { });
+		public Task Ready;
 
 
-		public ChildProcess(ValueSet req, ValueSet res) {
+		public ChildProcess(ValueSet req) {
 			this.req = req;
-			this.res = res;
-			Started = StartProcess();
-		}
-
-		private async Task StartProcess() {
-			//Console.WriteLine("StartProcess");
-			proc = new Process();
+			Proc = new Process();
+			// Read custom ID used to identify this process.
+			Cid = (int) req["cid"];
 			// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
 			// Or launched and blockingly waited out for exit - cp.exec().
 			var isLongRunning = req["startProcess"] as string == "spawn";
@@ -49,50 +44,50 @@ namespace UwpNodeBroker {
 			// Start the process.
 			if (isLongRunning) {
 				// Long running with asynchronous evented STDIO.
-				Spawn();
+				Ready = Spawn();
 			} else {
 				// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-				await Task.Run(() => Exec());
+				Ready = Task.Run(() => Exec());
 			}
 		}
 
 		private void SetupInfo() {
-			proc.StartInfo = info = new ProcessStartInfo();
+			Proc.StartInfo = Info = new ProcessStartInfo();
 			// Create the process without (visible) window.
-			info.WindowStyle = ProcessWindowStyle.Hidden;
-			info.CreateNoWindow = true;
-			info.UseShellExecute = false;
+			Info.WindowStyle = ProcessWindowStyle.Hidden;
+			Info.CreateNoWindow = true;
+			Info.UseShellExecute = false;
 			// Request admin access if needed (prompts UAC dialog)
 			//if (req.ContainsKey("admin"))
-			//	info.Verb = "runas";
+			//	Info.Verb = "runas";
 			// Setup what and where to start
-			info.FileName = req["program"] as string;
-			if (req.ContainsKey("args")) info.Arguments        = req["args"] as string;
-			if (req.ContainsKey("cwd"))  info.WorkingDirectory = req["cwd"] as string;
+			Info.FileName = req["program"] as string;
+			if (req.ContainsKey("args")) Info.Arguments        = req["args"] as string;
+			if (req.ContainsKey("cwd"))  Info.WorkingDirectory = req["cwd"] as string;
 		}
 
 		private void SetupStdio() {
 			// Pipes need to be created before the node process even starts
 			if (req.ContainsKey("stdio")) {
-				stdio = (req["stdio"] as string).Split('|');
-				for (int i = 0; i < stdio.Length; i++) {
+				Stdio = (req["stdio"] as string).Split('|');
+				for (int i = 0; i < Stdio.Length; i++) {
 					// stdio array from js comes in stringified so the nulls have to be tured into proper null again.
-					if (stdio[i] == "null" || stdio[i] == "ignore")
-						stdio[i] = null;
+					if (Stdio[i] == "null" || Stdio[i] == "ignore")
+						Stdio[i] = null;
 				}
 			} else {
-				stdio = new string[0];
+				Stdio = new string[0];
 			}
 
 			// Request access to STDIO
-			if (stdio.Length > 0 && stdio[0] != null) proc.StartInfo.RedirectStandardInput = true;
-			if (stdio.Length > 1 && stdio[1] != null) proc.StartInfo.RedirectStandardOutput = true;
-			if (stdio.Length > 2 && stdio[2] != null) proc.StartInfo.RedirectStandardError = true;
+			if (Stdio.Length > 0 && Stdio[0] != null) Proc.StartInfo.RedirectStandardInput = true;
+			if (Stdio.Length > 1 && Stdio[1] != null) Proc.StartInfo.RedirectStandardOutput = true;
+			if (Stdio.Length > 2 && Stdio[2] != null) Proc.StartInfo.RedirectStandardError = true;
 		}
 
 		private void SetupStdioPipes() {
 			// Only long running processes created with spawn() can be communicate asynchronously through custom pipes.
-			pipes = new NamedPipe[stdio.Length];
+			Pipes = new NamedPipe[Stdio.Length];
 			List<String> pipeNames = new List<String>();
 			// Skip the holy trinity of STDIO (IN/OUT/ERR) and start at custom pipes.
 			int fd = 3;
@@ -100,76 +95,80 @@ namespace UwpNodeBroker {
 			var newProcRandomNum = (new Random()).Next(0, 10000); // NOTE: ideally libuv/node would use win32 handle.
 			var brokerPid = Process.GetCurrentProcess().Id;
 			// Create custom pipes for the other remaining (defined by user) stdio pipes.
-			foreach (var type in stdio.Skip(fd)) {
+			foreach (var type in Stdio.Skip(fd)) {
 				var name = $"uwp-node\\{newProcRandomNum}-{fd}-{brokerPid}";
 				pipeNames.Add(name);
 				var pipe = new NamedPipe(name);
 				pipe.fd = fd;
 				// Handle and report all output and errors of the pipe.
-				pipe.Data += (byte[] data) => ReportData(data, pipe.fd);
-				pipe.Error += (string err) => ReportError(err, pipe.fd);
+				pipe.Data += data => ReportData(data, pipe.fd);
+				pipe.Error += err => ReportError(err, pipe.fd);
 				// Pushing null to stream causes it to close and emit 'end' event.
 				pipe.End += () => ReportData(null, pipe.fd);
-				pipes[fd] = pipe;
+				Pipes[fd] = pipe;
 				fd++;
 			}
 			// SIDE-NOTE: Because there's no easy way of creating libuv-style named-pipes that would get picked up by node
 			// natively, we have to pass in through env vars custom list of names of pipes that we're creating in C#
 			// that JS side of of uwp-node has too bind to.
-			info.EnvironmentVariables.Add("uwp-node-stdio-pipes", string.Join("|", pipeNames));
-			if (stdio.Contains("ipc")) {
-				int ipcFd = Array.FindIndex(stdio, item => item == "ipc");
-				info.EnvironmentVariables.Add("uwp-node-stdio-ipc", ipcFd.ToString());
+			Info.EnvironmentVariables.Add("uwp-node-stdio-pipes", string.Join("|", pipeNames));
+			if (Stdio.Contains("ipc")) {
+				int ipcFd = Array.FindIndex(Stdio, item => item == "ipc");
+				Info.EnvironmentVariables.Add("uwp-node-stdio-ipc", ipcFd.ToString());
 			}
 		}
 
 		// Starts the process as long running with asynchronous evented STDIO.
-		public void Spawn() {
+		public async Task Spawn() {
 			try {
 				// Handle lifecycle events
-				proc.EnableRaisingEvents = true;
-				proc.Exited   += OnExited;
-				proc.Disposed += OnDisposed;
+				Proc.EnableRaisingEvents = true;
+				Proc.Exited   += OnExited;
+				Proc.Disposed += OnDisposed;
 				// Attach handlers for STDOUT and STDERR
 				// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
 				// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-				if (info.RedirectStandardOutput) proc.OutputDataReceived += (object s, DataReceivedEventArgs e) => ReportData(e.Data, 1);
-				if (info.RedirectStandardError)  proc.ErrorDataReceived  += (object s, DataReceivedEventArgs e) => ReportData(e.Data, 2);
+				if (Info.RedirectStandardOutput) Proc.OutputDataReceived += (s, e) => ReportData(e.Data, 1);
+				if (Info.RedirectStandardError)  Proc.ErrorDataReceived  += (s, e) => ReportData(e.Data, 2);
 				// Start the process and begin receiving data on STDIO streams.
-				proc.Start();
-				if (info.RedirectStandardOutput) proc.BeginOutputReadLine();
-				if (info.RedirectStandardError)  proc.BeginErrorReadLine();
+				Proc.Start();
+				if (Info.RedirectStandardOutput) Proc.BeginOutputReadLine();
+				if (Info.RedirectStandardError)  Proc.BeginErrorReadLine();
 				// Tell parent app about the newly spawned process and its PID.
-				Pid = proc.Id;
+				Pid = Proc.Id;
+				// Report back first basic information about the established process.
+				var res = new ValueSet();
+				res.Add("cid", Cid);
 				res.Add("pid", Pid);
-				//Console.WriteLine($"spawned pid {Pid}");
+				await UWP.Send(res);
 			} catch (Exception err) {
 				HandleError(err);
 			}
 		}
 
 		// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-		public void Exec() {
+		public async Task Exec() {
 			try {
 				// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
-				proc.Start();
-				Pid = proc.Id;
-				if (info.RedirectStandardOutput) res.Add("stdout", proc.StandardOutput.ReadToEnd());
-				if (info.RedirectStandardError)  res.Add("stderr", proc.StandardError.ReadToEnd());
+				Proc.Start();
+				Pid = Proc.Id;
+				var res = new ValueSet();
+				if (Info.RedirectStandardOutput) res.Add("stdout", Proc.StandardOutput.ReadToEnd());
+				if (Info.RedirectStandardError)  res.Add("stderr", Proc.StandardError.ReadToEnd());
 				// Synchronously block the task until the process exits.
-				proc.WaitForExit();
-				// Close the process & releases all resources.
-				res.Add("exitCode", proc.ExitCode);
-				// Release resources and emit processClosed event.
+				Proc.WaitForExit();
+				// Report back information about the process.
+				res.Add("exitCode", Proc.ExitCode);
+				await Report(res);
+				// Close the process, release all resources and emit processClosed event.
 				Dispose();
 			} catch (Exception err) {
 				HandleError(err);
 			}
 		}
 
-		private void HandleError(Exception err) {
-			//Console.WriteLine($"FAIL: {err}");
-			res.Add("error", err.ToString());
+		private async void HandleError(Exception err) {
+			await ReportError(err.ToString());
 			Dispose();
 		}
 
@@ -182,34 +181,39 @@ namespace UwpNodeBroker {
 			if (fd == 0) {
 				// Writes data to STDIN.
 				string str = Encoding.UTF8.GetString(buffer, 0, buffer.Length);
-				await proc.StandardInput.WriteAsync(str);
-				await proc.StandardInput.FlushAsync();
+				await Proc.StandardInput.WriteAsync(str);
+				await Proc.StandardInput.FlushAsync();
 			} else if (fd > 2) {
 				// Writes data to custom named pipes.
-				if (pipes.Length < fd && pipes[fd] != null)
-					await pipes[fd].Write(buffer);
+				if (Pipes.Length < fd && Pipes[fd] != null)
+					await Pipes[fd].Write(buffer);
 			}
 		}
 
-		private async void ReportData(object data, int fd) {
+		private async Task ReportData(object data, int fd) {
 			ValueSet message = new ValueSet();
-			message.Add("pid", Pid);
 			message.Add("fd", fd);
 			message.Add("data", data);
 			await Report(message);
 		}
 
-		private async void ReportError(object err, int fd) {
+		private async Task ReportError(object err, int fd) {
 			ValueSet message = new ValueSet();
-			message.Add("pid", Pid);
 			message.Add("fd", fd);
 			message.Add("error", err);
 			await Report(message);
 		}
 
+		private async Task ReportError(object err) {
+			ValueSet message = new ValueSet();
+			message.Add("error", err);
+			await Report(message);
+		}
+
 		private async Task Report(ValueSet message) {
-			if (!IpcReady.IsCompleted)
-				await IpcReady;
+			message.Add("cid", Cid);
+			if (!Ready.IsCompleted)
+				await Ready;
 			await UWP.Send(message);
 		}
 
@@ -220,9 +224,8 @@ namespace UwpNodeBroker {
 
 		private async void OnExited(object sender = null, EventArgs e = null) {
 			ValueSet message = new ValueSet();
-			message.Add("pid", Pid);
-			message.Add("exitCode", proc.ExitCode);
-			//Console.WriteLine($"EXITED {Pid} {proc.ExitCode}");
+			//message.Add("pid", Pid);
+			message.Add("exitCode", Proc.ExitCode);
 			await Report(message);
 			Dispose();
 		}
@@ -239,24 +242,24 @@ namespace UwpNodeBroker {
 
 		// Closes the process, releases all resources & emits Disposed event.
 		public void Dispose() {
-			if (proc == null) return;
+			if (Proc == null) return;
 			try {
-				proc.Disposed -= OnDisposed;
-				proc.Exited -= OnExited;
-				proc.Close();
-				proc.Dispose();
+				Proc.Disposed -= OnDisposed;
+				Proc.Exited -= OnExited;
+				Proc.Close();
+				Proc.Dispose();
 			} catch { }
-			if (pipes != null) {
-				foreach (NamedPipe pipe in pipes) {
+			if (Pipes != null) {
+				foreach (NamedPipe pipe in Pipes) {
 					pipe?.Dispose();
 				}
 			}
 			Disposed?.Invoke();
 			Disposed = null;
-			proc = null;
-			info = null;
-			stdio = null;
-			pipes = null;
+			Proc = null;
+			Info = null;
+			Stdio = null;
+			Pipes = null;
 		}
 
 

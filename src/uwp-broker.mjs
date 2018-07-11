@@ -18,22 +18,11 @@ if (isUwp || isUwpMock) {
 	if (typeof window !== 'undefined')
 		rtComponent = window[rtComponentName]
 
-	function wrapUwpPromise(iAsyncOperation) {
-		return new Promise((resolve, reject) => iAsyncOperation.done(resolve, reject))
-	}
-
 	function objectToValueSet(object) {
 		var valueSet = new ValueSet()
 		for (var key in object)
 			valueSet.insert(key, object[key])
 		return valueSet
-	}
-
-	function valueSetToObject(valueSet) {
-		var object = {}
-		for (var key of Object.getOwnPropertyNames(valueSet))
-			object[key] = valueSet[key]
-		return object
 	}
 
 
@@ -79,10 +68,19 @@ if (isUwp || isUwpMock) {
 		_onRequestReceived(e) {
 			var valueSet = e.request.message
 			//console.log('_onRequestReceived', valueSet)
-			if (valueSet.ipc)
+			if (valueSet.error && !valueSet.cid) {
+				if (this._events.error && this._events.error.length) {
+					super.emit('error', valueSet.error) // TODO: maybe throw if there's no listener, like Node
+				} else {
+					var err = new Error('Uncaught uwp-node broker error')
+					err.stack = valueSet.error
+					throw err
+				}
+			} else if (valueSet.ipc) {
 				super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
-			else
-				super.emit('_internalMessage', valueSet)
+			} else {
+				super.emit('internalMessage', valueSet)
+			}
 		}
 		
 		_onBackgroundActivated(e) {
@@ -120,6 +118,10 @@ if (isUwp || isUwpMock) {
 			}
 		}
 
+		_emitError(err) {
+			super.emit('error', err)
+		}
+
 		async send(message) {
 			if (!this.connected) {
 					// todo, this should be handled by setupChannel()
@@ -138,25 +140,19 @@ if (isUwp || isUwpMock) {
 		// - Or throws if the response contains error ('error' field).
 		async _internalSend(object) {
 			//console.log('_internalSend', object)
-			var valueSet = objectToValueSet(object)
-			var response = await wrapUwpPromise(this.connection.sendMessageAsync(valueSet))
-			var res = response.message
-			// Reject the promise if response.message contains 'error' property (the call failed).
-			if (res.error)
-				throw new Error(res.error)
-			else if (res.size !== 0)
-				return valueSetToObject(res)
-		}
-
-		write(buffer) {
-			console.warn('uwp-node.broker is not a stream and .write() method should not be used.')
+			var req = objectToValueSet(object)
+			try {
+				await this.connection.sendMessageAsync(req)
+			} catch(err) {
+				this._emitError(err)
+			}
 		}
 
 		async launch() {
 			try {
 				await FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
 			} catch(err) {
-				super.emit('error', err)
+				this._emitError(err)
 			}
 		}
 
