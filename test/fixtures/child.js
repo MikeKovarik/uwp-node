@@ -1,6 +1,4 @@
-require('../node.js')
-var ipcEnabled = !!process.send
-console.log('i am child', ipcEnabled ? 'with IPC' : 'without IPC')
+require('../../node.js')
 console.log('child process.channel.fd', process.channel && process.channel.fd)
 console.log('child pid', process.pid, `(parent ${process.ppid})`)
 console.error('child cries')

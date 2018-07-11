@@ -74,18 +74,15 @@ class AppServiceConnection extends EventTarget {
 	}
 
 	sendMessageAsync(req) {
-		return new Promise(resolve => {
-			req.mockReqId = Math.floor(Math.random() * 100000)
-			var responseFinder = message => {
-				if (message.mockReqId === req.mockReqId) {
-					this.removeListener('_response', responseFinder)
-					delete message.mockReqId
-					resolve({message})
-				}
-			}
-			this.on('_response', responseFinder)
+		if (!this.proc.connected) return
+		if (this.proc.killed) return
+		try {
 			this.proc.send(req)
-		})
+		} catch(err) {
+			console.warning('uwp-node mock was unable to sendMessageAsync()')
+			console.warning(req)
+			console.warning(err)
+		}
 	}
 
 }
