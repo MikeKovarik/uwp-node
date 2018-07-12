@@ -8,5 +8,5 @@ module.exports.promiseEvent = function(emitter, name) {
 }
 
 module.exports.promiseTimeout = (millis = 0) => {
-	new Promise(resolve => setTimeout(resolve, millis))
+	return new Promise(resolve => setTimeout(resolve, millis))
 }

@@ -31,7 +31,7 @@ namespace UwpNodeBroker {
 			// Only command without PID is starting a program.
 			if (req.ContainsKey("startProcess")) {
 				var child = StartProcess(req);
-			} else if (req.ContainsKey("pid")) {
+			} else if (req.ContainsKey("cid")) {
 				// From now on we deal with exact process.
 				// Get PID and Process instance of targetted process.
 				var child = GetProcess(req);
@@ -52,7 +52,9 @@ namespace UwpNodeBroker {
 			Children.Add(child);
 			Change?.Invoke();
 			child.Disposed += () => {
-				Children.Remove(child);
+				var index = Children.IndexOf(child);
+				if (Children.Contains(child))
+					Children.Remove(child);
 				Change?.Invoke();
 			};
 			return child;

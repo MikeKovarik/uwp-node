@@ -21,6 +21,7 @@ namespace UwpNodeBroker {
 
 		public int Pid;
 		public int Cid;
+		public bool Killed = false;
 		public event Action Disposed;
 		public Task Ready;
 
@@ -223,9 +224,18 @@ namespace UwpNodeBroker {
 		///////////////////////////////////////////////////////////////////////
 
 		private async void OnExited(object sender = null, EventArgs e = null) {
+			//Console.WriteLine("### OnExited ###");
 			ValueSet message = new ValueSet();
-			//message.Add("pid", Pid);
-			message.Add("exitCode", Proc.ExitCode);
+			if (Killed) {
+				// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
+				message.Add("exitCode", null);
+			} else {
+				try {
+					message.Add("exitCode", Proc.ExitCode);
+				} catch {
+					message.Add("exitCode", -1);
+				}
+			}
 			await Report(message);
 			Dispose();
 		}
@@ -238,28 +248,36 @@ namespace UwpNodeBroker {
 		// DISPOSE
 		///////////////////////////////////////////////////////////////////////
 
-		public void Kill() => Dispose();
+		public void Kill() {
+			Killed = true;
+			if (!Proc.HasExited)
+				Proc.Kill();
+		}
 
 		// Closes the process, releases all resources & emits Disposed event.
 		public void Dispose() {
-			if (Proc == null) return;
-			try {
-				Proc.Disposed -= OnDisposed;
-				Proc.Exited -= OnExited;
-				Proc.Close();
-				Proc.Dispose();
-			} catch { }
+			//Console.WriteLine($"### Dispose {Cid}");
+			if (Proc != null) {
+				try {
+					Proc.Disposed -= OnDisposed;
+					Proc.Exited -= OnExited;
+					Proc.Close();
+					Proc.Dispose();
+				} catch { }
+			}
 			if (Pipes != null) {
 				foreach (NamedPipe pipe in Pipes) {
 					pipe?.Dispose();
 				}
 			}
-			Disposed?.Invoke();
-			Disposed = null;
-			Proc = null;
-			Info = null;
-			Stdio = null;
-			Pipes = null;
+			if (Proc != null || Pipes != null) {
+				Proc = null;
+				Info = null;
+				Stdio = null;
+				Pipes = null;
+				Disposed?.Invoke();
+				Disposed = null;
+			}
 		}
 
 
