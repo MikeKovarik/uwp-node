@@ -9,10 +9,10 @@ global.exec = exec
 
 
 process.on('unhandledRejection', (reason, p) => {
-	console.error(reason, 'Unhandled Rejection at Promise', p)
+	console.error('Unhandled Rejection\n', reason)
 })
 process.on('uncaughtException', err => {
-	console.error(err, 'Uncaught Exception thrown')
+	console.error('Uncaught Exception thrown\n', err)
 	process.exit(1)
 })
 
