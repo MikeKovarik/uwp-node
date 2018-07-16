@@ -5,11 +5,11 @@ import {createNamedPipe} from './util.mjs'
 
 
 if (isNode) {
-	
+
 	var {env} = process
 
 	// Apply parent process PID.
-	if (env['uwp-node-ppid']) {
+	if ('uwp-node-ppid' in env) {
 		process.ppid = parseInt(env['uwp-node-ppid'])
 		delete env['uwp-node-ppid']
 	}
@@ -17,14 +17,14 @@ if (isNode) {
 	//var stdio = [process.stdin, process.stdout, process.stderr]
 	var stdio = [null, null, null]
 	var stdioPipeNames = [null, null, null]
-	if (env['uwp-node-stdio-pipes']) {
+	if ('uwp-node-stdio-pipes' in env) {
 		stdioPipeNames.push(...env['uwp-node-stdio-pipes'].split('|'))
 		// Cleanup the property after to prevent pollution of env vars.
 		delete env['uwp-node-stdio-pipes']
 	}
 
 	// FD of the pipe used for Node style IPC
-	if (env['uwp-node-stdio-ipc']) {
+	if ('uwp-node-stdio-ipc' in env) {
 		// Cleanup the property after to prevent pollution of env vars.
 		var ipcFd = parseInt(env['uwp-node-stdio-ipc'])
 		delete env['uwp-node-stdio-ipc']

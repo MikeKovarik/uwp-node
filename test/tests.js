@@ -7,6 +7,7 @@ var {NODE, promiseEvent, promiseTimeout} = require('./test-util.js')
 // TODO: MORE TESTS:
 //       - exitcode tests, file that throws, self closing file, etc...
 
+var scriptEnv = './fixtures/child-env.js'
 var scriptSimple = './fixtures/simple.js'
 var scriptDelayed = './fixtures/simple-delayed.js'
 var scriptEndless = './fixtures/simple-endless.js'
@@ -19,6 +20,17 @@ describe('spawn', function() {
 
 	describe('basic scenarios', function() {
 
+
+		it(`process.env is not polluted`, async () => {
+			var stdio = 'pipe'
+			var child = spawn(NODE, [scriptEnv], {stdio})
+			var json = ''
+			child.stdout.on('data', buffer => json += buffer)
+			await promiseEvent(child, 'exit')
+			var env = JSON.parse(json)
+			var found = Object.keys(env).find(key => key.startsWith('uwp-node'))
+			assert.isUndefined(found, 'env should not conain uwp-node-* keys')
+		})
 
 		it(`process closes if it doesnt have IPC`, async () => {
 			var stdio = 'pipe'
