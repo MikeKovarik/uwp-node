@@ -28,7 +28,7 @@ namespace UwpNodeBroker {
 		// to postpone response to caller (app behind the UWP class) until we have either PID of the process
 		// or error message thrown while spawning the process.
 		static void OnMessage(ValueSet req) {
-			// Only command without PID is starting a program.
+			// Only command without PID is starting a file.
 			if (req.ContainsKey("startProcess")) {
 				var child = StartProcess(req);
 			} else if (req.ContainsKey("cid")) {

@@ -1,6 +1,11 @@
 import {isUwp, isUwpMock} from './util.mjs'
 import {ChildProcess} from './uwp-ChildProcess.mjs'
-import {ERR_INVALID_OPT_VALUE, ERR_CHILD_PROCESS_IPC_REQUIRED} from './errors.mjs'
+import {
+	ERR_INVALID_OPT_VALUE,
+	ERR_CHILD_PROCESS_IPC_REQUIRED,
+	ERR_INVALID_ARG_TYPE,
+	ERR_INVALID_ARG_VALUE
+} from './errors.mjs'
 
 
 export var spawn
@@ -47,37 +52,95 @@ if (isUwp || isUwpMock) {
 
 
 	// NOTE: this does not implement the insanely complex checks that node does
+	// NOTE: only certain options fields are available.
 	// in https://github.com/nodejs/node/blob/master/lib/child_process.js
-	function normalizeSpawnArguments(program, args = [], options = {}) {
+	function normalizeSpawnArguments(file, args = [], options = {}) {
+		if (typeof file !== 'string')
+			throw new ERR_INVALID_ARG_TYPE('file', 'string', file)
+
+		if (file.length === 0)
+			throw new ERR_INVALID_ARG_VALUE('file', file, 'cannot be empty')
+
+		if (Array.isArray(args)) {
+			args = args.slice(0)
+		} else if (args !== undefined && (args === null || typeof args !== 'object')) {
+			throw new ERR_INVALID_ARG_TYPE('args', 'object', args)
+		} else {
+			options = args
+			args = []
+		}
+
+		if (options === undefined)
+			options = {}
+		else if (options === null || typeof options !== 'object')
+			throw new ERR_INVALID_ARG_TYPE('options', 'object', options)
+
+		// Validate the cwd, if present.
+		if (options.cwd != null && typeof options.cwd !== 'string')
+			throw new ERR_INVALID_ARG_TYPE('options.cwd', 'string', options.cwd)
+
+		// Validate the shell, if present.
+		if (options.shell != null && typeof options.shell !== 'boolean' && typeof options.shell !== 'string')
+			throw new ERR_INVALID_ARG_TYPE('options.shell', ['boolean', 'string'], options.shell)
+
+		// Make a shallow copy so we don't clobber the user's options object.
+		options = Object.assign({}, options)
+
 		if (typeof args === 'object' && !Array.isArray(args)) {
 			options = args
 			args = []
 		}
-		return [program, args, options]
+		return {file, args, options}
 	}
 
 	spawn = function(...spawnArgs) {
-		var [program, args, options] = normalizeSpawnArguments(...spawnArgs)
-		return new ChildProcess(program, args, options)
+		var {file, args, options} = normalizeSpawnArguments(...spawnArgs)
+		options.startProcess = 'spawn'
+		options.file = file
+		options.args = args
+		var child = new ChildProcess()
+		child.spawn(options)
+		return child
 	}
 
 
-	// WARNING: We're implementing only the promisified non-returning variant of exec().
-	// exec() waits with its callback for the process to close and the function by default also
-	// returns ChildProcess instance. But it's pretty much useless since we're only waiting for
-	// complete stdout and stderr and we can't even define (create custom) pipes or use stdin.
-	exec = function(command, options = {}, callback) {
+
+	function normalizeExecArgs(command, options = {}, callback) {
 		if (typeof options === 'function') {
 			callback = options
-			options = {}
+			options = undefined
 		}
-		// TODO: revert back to instantiating ChildProcess.
+		// Make a shallow copy so we don't clobber the user's options object.
+		options = Object.assign({}, options)
+		//options.shell = typeof options.shell === 'string' ? options.shell : true
+		// TODO: parse command into file and args
+		options.file = command
+		options.args = []
+		return {command, options, callback}
+	}
+
+	exec = function(...execArgs) {
+		var {command, options, callback} = normalizeExecArgs(...execArgs)
 		options.startProcess = 'exec'
 		options.shell = options.shell || 'cmd.exe'
-
-		var promise = ChildProcess._exec(options)
+		var child = new ChildProcess()
+		child.spawn(options)
+		var promise = new Promise((resolve, reject) => {
+			var stdout = ''
+			var stderr = ''
+			child.stdout.on('data', buffer => stdout += buffer)
+			child.stderr.on('data', buffer => stderr += buffer)
+			child.stderr.once('error', reject)
+			child.stderr.once('exit', code => {
+				if (code < 0)
+					reject()
+				else
+					resolve({stdout, stderr})
+			})
+		})
 		if (callback) {
-			promise.then(res => callback(null, res.stdout, res.stderr))
+			promise
+				.then(res => callback(null, res.stdout, res.stderr))
 				.catch(err => callback(err))
 		} else {
 			return promise

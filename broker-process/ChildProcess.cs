@@ -62,7 +62,7 @@ namespace UwpNodeBroker {
 			//if (req.ContainsKey("admin"))
 			//	Info.Verb = "runas";
 			// Setup what and where to start
-			Info.FileName = req["program"] as string;
+			Info.FileName = req["file"] as string;
 			if (req.ContainsKey("args")) Info.Arguments        = req["args"] as string;
 			if (req.ContainsKey("cwd"))  Info.WorkingDirectory = req["cwd"] as string;
 		}
@@ -129,8 +129,10 @@ namespace UwpNodeBroker {
 				// Attach handlers for STDOUT and STDERR
 				// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
 				// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-				if (Info.RedirectStandardOutput) Proc.OutputDataReceived += (s, e) => ReportData(e.Data, 1);
-				if (Info.RedirectStandardError)  Proc.ErrorDataReceived  += (s, e) => ReportData(e.Data, 2);
+				if (Info.RedirectStandardOutput)
+					Proc.OutputDataReceived += (s, e) => ReportData(e.Data == null ? null : e.Data + "\n", 1);
+				if (Info.RedirectStandardError)
+					Proc.ErrorDataReceived  += (s, e) => ReportData(e.Data == null ? null : e.Data + "\n", 2);
 				// Start the process and begin receiving data on STDIO streams.
 				Proc.Start();
 				if (Info.RedirectStandardOutput) Proc.BeginOutputReadLine();
@@ -169,7 +171,14 @@ namespace UwpNodeBroker {
 		}
 
 		private async void HandleError(Exception err) {
-			await ReportError(err.ToString());
+			switch (err.Message) {
+				case "The system cannot find the file specified":
+					await ReportExit(-4058); // ENOENT
+					break;
+				default:
+					await ReportError(err.Message, err.StackTrace);
+					break;
+			}
 			Dispose();
 		}
 
@@ -202,20 +211,34 @@ namespace UwpNodeBroker {
 			ValueSet message = new ValueSet();
 			message.Add("fd", fd);
 			message.Add("error", err);
-			await Report(message);
+			await Report(message, true);
+		}
+
+		private async Task ReportError(string err, string stack) {
+			ValueSet message = new ValueSet();
+			message.Add("error", err);
+			message.Add("stack", stack);
+			await Report(message, true);
 		}
 
 		private async Task ReportError(object err) {
 			ValueSet message = new ValueSet();
 			message.Add("error", err);
-			await Report(message);
+			await Report(message, true);
 		}
 
-		private async Task Report(ValueSet message) {
+		private async Task Report(ValueSet message, bool ignoreReady = false) {
 			message.Add("cid", Cid);
-			if (!Ready.IsCompleted)
+			if (!ignoreReady && !Ready.IsCompleted)
 				await Ready;
 			await UWP.Send(message);
+		}
+
+		// NOTE: has to be object due to null.
+		private async Task ReportExit(object exitCode) {
+			ValueSet message = new ValueSet();
+			message.Add("exitCode", exitCode);
+			await Report(message, true);
 		}
 
 
@@ -225,18 +248,16 @@ namespace UwpNodeBroker {
 
 		private async void OnExited(object sender = null, EventArgs e = null) {
 			//Console.WriteLine("### OnExited ###");
-			ValueSet message = new ValueSet();
 			if (Killed) {
 				// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
-				message.Add("exitCode", null);
+				await ReportExit(null);
 			} else {
 				try {
-					message.Add("exitCode", Proc.ExitCode);
+					await ReportExit(Proc.ExitCode);
 				} catch {
-					message.Add("exitCode", -1);
+					await ReportExit(-1);
 				}
 			}
-			await Report(message);
 			Dispose();
 		}
 

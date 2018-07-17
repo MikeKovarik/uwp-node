@@ -2,7 +2,11 @@ import {EventEmitter} from 'events'
 import {Readable, Writable, Duplex} from 'stream'
 import {broker} from './uwp-broker.mjs'
 import {setupChannel} from './util.mjs'
-import {ERR_INVALID_OPT_VALUE} from './errors.mjs'
+import {
+	ERR_INVALID_OPT_VALUE,
+	ERR_INVALID_ARG_TYPE,
+	errnoException
+} from './errors.mjs'
 
 
 const STDIN = 0
@@ -24,7 +28,7 @@ function generateCid() {
 
 export class ChildProcess extends EventEmitter {
 
-	constructor(program, args = [], options = {}) {
+	constructor() {
 		super()
 
 		// Custom ID (not to be mistaked with PID = Process ID managed by system).
@@ -39,7 +43,7 @@ export class ChildProcess extends EventEmitter {
 
 		// Process is started in background broker
 		if (!broker.connected)
-			throw new Error(`child process ${program} could not be spawned because uwp-node-broker process is not running.`)
+			throw new Error(`child process ${file} could not be spawned because uwp-node-broker process is not running.`)
 
 		// Each created stdio pipe/stream increments _closesNeeded counter.
 		// Each time 'end' is emitted on stdio or 'exit' is emitted on process the _closesGot increments.
@@ -53,54 +57,60 @@ export class ChildProcess extends EventEmitter {
 
 		this._onMessage = this._onMessage.bind(this)
 		this._destroy = this._destroy.bind(this)
-		this._onSetupMessage = this._onSetupMessage.bind(this)
 		this._maybeClose = this._maybeClose.bind(this)
-
-		options.stdio = this._sanitizeStdio(options.stdio)
-		this._prepareStdio(options.stdio)
-		// UWP ValueSet does not accept arrays, so we have to stringify it.
-		options.stdio = options.stdio.join('|')
-		
-		this.stdin  = this.stdio[0] || null
-		this.stdout = this.stdio[1] || null
-		this.stderr = this.stdio[2] || null
-
-		// Extend options to be passed into runtime component but preserve user's options object.
-		options = Object.assign({}, options)
-		options.program = program
-		options.args = args.join(' ')
-		options.cwd = options.cwd || process.cwd()
-		// 'spawn' - long running with asynchronous evented STDIO.
-		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
-		options.startProcess = options.startProcess || 'spawn'
 
 		// Desotroy all pipes, resources, and listeners when the process closes or errors.
 		// NOTE: C# broker should take care of disposing and releasing its resources, so there
 		//       is no need to call kill() from here, once the process closes.
 		this.once('close', this._destroy)
 		this.once('error', this._destroy)
-
-		// Launch the process.
-		options.cid = this.cid
-		broker.on('internalMessage', this._onSetupMessage)
-		broker._internalSend(options)
 	}
 
-	_onSetupMessage(res) {
-		//console.log('_onSetupMessage()', this.cid, res)
-		if (res.cid === this.cid) {
-			if (res.error) {
-				this._handleError(res.error)
-			} else if (res.pid !== undefined) {
-				// Broker finally started the process and sent us this first message with PID.
-				// There are more to come, they will be marked with CID (not PID).
-				// Now we need to setup everything
-				broker.removeListener('internalMessage', this._onSetupMessage)
-				this.pid = res.pid
-				// Attach stdio events listeners and pipes to the broker process.
-				this._attachToBroker()
-			}
+	// https://github.com/nodejs/node/blob/master/lib/internal/child_process.js
+	// This method tries to follow Node.js' source code. Their code is a mess that could've been simpler
+	// but we try to follow it as closely as possible to avoid unnecessary errors or unexpected functionality.
+	spawn(options) {
+		if (options === null || typeof options !== 'object') {
+			throw new ERR_INVALID_ARG_TYPE('options', 'Object', options)
 		}
+
+		// We try to be as close to Node.js actual _validateStdio, but their's is a hot mess.
+		// Our method returns array of types that we can stringify and pass to broker.
+		// Then we added method _setupStdio() that creates the pipes and encapsulates
+		// all the code that would be otherwise spilled all over spawn() as it is in Node's source.
+		// instad of array of objects.
+		options.stdio = this._validateStdio(options.stdio)
+
+		if (typeof options.file !== 'string')
+			throw new ERR_INVALID_ARG_TYPE('options.file', 'string', options.file)
+		this.spawnfile = options.file
+
+		if (Array.isArray(options.args))
+			this.spawnargs = options.args
+		else if (options.args === undefined)
+			this.spawnargs = []
+		else
+			throw new ERR_INVALID_ARG_TYPE('options.args', 'Array', options.args)
+
+		options.cwd = options.cwd || process.cwd()
+		// 'spawn' - long running with asynchronous evented STDIO.
+		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
+		options.startProcess = options.startProcess || 'spawn'
+		// Custom ID necessary for identification of messages or errors. Using PIDs is not possible due to timing.
+		options.cid = this.cid
+
+		// Node would wait with stdio setup until after possible error is thrown,
+		// but we can only get async errors, so we always need to setup everything.
+		this._setupStdio(options.stdio)
+		// Launch and start receving messages from C# broker.
+		this._attachToBroker()
+
+		// Passing the important and custom fields to C#.
+		// UWP ValueSet does not accept arrays, so we have to stringify it.
+		options.stdio = options.stdio.join('|')
+		options.args = options.args.join(' ')
+
+		broker._internalSend(options)
 	}
 
 	// Attaches current instance (now that we now PID of the remotely created process)
@@ -145,15 +155,26 @@ export class ChildProcess extends EventEmitter {
 				pipe.push(Buffer.from(res.data))
 			}
 			// Emit error on the stream given by fd.
-			if (res.error) pipe.emit('error', res.error)
+			if (res.error) pipe.emit('error', new Error(res.error))
 		} else {
 			// Emit bigass error on the process object. Something gone very wrong.
-			if (res.error) this._handleError(res.error)
+			if (res.error) this._handleError(res.error, res.stack)
 		}
 	}
 
-	_handleError(err) {
-		console.log('_handleError()', err instanceof Error, err)
+	_handleError(message, stack) {
+		if (message instanceof Error) {
+			var err = message
+		} else {
+			var err = errnoException(null, 'spawn', message)
+			err.stack = stack
+			/*
+			var err = new Error(message)
+			err.message = message
+			err.code = err.errno = 'UNKNOWN'
+			err.syscall = 'spawn'
+			*/
+		}
 		setTimeout(() => this.emit('error', err))
 	}
 
@@ -178,7 +199,6 @@ export class ChildProcess extends EventEmitter {
 		//console.log('_destroy', this.cid)
 		//console.log('################################################################')
 		broker.removeListener('internalMessage', this._onMessage)
-		broker.removeListener('internalMessage', this._onSetupMessage)
 		this.removeListener('close', this._destroy)
 		this.removeListener('error', this._destroy)
 		this._flushStdio()
@@ -198,10 +218,13 @@ export class ChildProcess extends EventEmitter {
 		this.exitCode = exitCode
 		setTimeout(() => {
 			// NOTE: killing the process with .kill() results in exitCode=null. It should not throw.
-			if (exitCode !== null && exitCode < 0)
-				this._handleError(new Error(`errnoException spawn ${exitCode}`))
-			else
+			if (exitCode !== null && exitCode < 0) {
+				var syscall = this.spawnfile ? 'spawn ' + this.spawnfile : 'spawn'
+				var err = errnoException(exitCode, syscall)
+				this._handleError(err)
+			} else {
 				this.emit('exit', this.exitCode, this.signalCode)
+			}
 			this._maybeClose()
 			this._flushStdio()
 			// NOTE: Race between process and stdio disposal might leave some of the custom stdio pipes left unclosed.
@@ -247,7 +270,11 @@ export class ChildProcess extends EventEmitter {
 			this.emit('close', this.exitCode, this.signalCode)
 	}
 
-	_sanitizeStdio(stdio = 'pipe') {
+	// https://github.com/nodejs/node/blob/master/lib/internal/child_process.js
+	// This method tries to be as close to Node.js actual _validateStdio,
+	// but that one is a hot mess. Our method returns array of types (ignore, null, pipe, etc..)
+	// instad of array of objects.
+	_validateStdio(stdio = 'pipe') {
 		// Transform shortcut form into an array.
 		if (typeof stdio === 'string') {
 			switch (stdio) {
@@ -264,23 +291,23 @@ export class ChildProcess extends EventEmitter {
 		// Fill stdio with defaults (three ignores) if none other
 		while (stdio.length < 3)
 			stdio.push('ignore')
-		stdio = stdio.map((item, i) => {
-			if (item === null || item === undefined)
-				return i < 3 ? 'pipe' : 'ignore'
-			if (item === 'inherit')
-				return i
-			return item
+		stdio = stdio.map((type, fd) => {
+			if (type === null || type === undefined)
+				return fd < 3 ? 'pipe' : 'ignore'
+			if (type === 'inherit')
+				return fd
+			return type
 		})
 
 		return stdio
 	}
 
-	_prepareStdio(stdio) {
+	_setupStdio(stdio) {
 		// Create streams for communication with the child process.
 		// These are the one representing child's stdin, stdout, stderr and other custom pipes
 		// that pierce the boundary of main processes and serve as sink/source for child.
-		this._pipes = stdio.map((item, fd) => {
-			if (item === 'ignore')
+		this._pipes = stdio.map((type, fd) => {
+			if (type === 'ignore')
 				return null
 			if (fd === STDIN)
 				return new Writable
@@ -288,7 +315,7 @@ export class ChildProcess extends EventEmitter {
 				var stream = new Readable
 			else
 				var stream = new Duplex
-			if (item === 'ipc')
+			if (type === 'ipc')
 				stream.ipc = true
 			// Reading can't be forced
 			stream._read = () => {}
@@ -302,18 +329,22 @@ export class ChildProcess extends EventEmitter {
 			return stream
 		})
 
+		this.stdin  = this._pipes[0] || null
+		this.stdout = this._pipes[1] || null
+		this.stderr = this._pipes[2] || null
+
 		// Copy internal streams array into Node's proc.stdio and replace 'ipc' with null if needed.
 		this.stdio = this._pipes.slice(0)
 		if (stdio.includes('ipc')) {
 			//this._closesNeeded++
-			let fd = stdio.indexOf('ipc')
+			let ipcFd = stdio.indexOf('ipc')
 			// Create Duplex stream on which messages will be received,
-			this.channel = this.stdio[fd]
+			var ipc = this.channel = this.stdio[ipcFd]
 			// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
 			// handle and parse incomming data and re-emit it as 'message' events.
 			setupChannel(this, this.channel)
 			// IPC channel is integrated into the process object. The stream is not directly available.
-			this.stdio[fd] = null
+			this.stdio[ipcFd] = null
 		}
 
 		// Array of user defined streams that are piped to/from child process' stdio streams.
