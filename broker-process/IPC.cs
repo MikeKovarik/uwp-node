@@ -48,7 +48,7 @@ namespace UwpNodeBroker {
 			string temp = "";
 			childIpcPipe.Data += (byte[] buffer) => {
 				try {
-					temp += Encoding.UTF8.GetString(buffer);
+					temp += Encoding.Default.GetString(buffer);
 					List<string> messages = temp.Split('\n').ToList();
 					var incomplete = messages.Last();
 					foreach (string message in messages.Take(messages.Count - 1)) {

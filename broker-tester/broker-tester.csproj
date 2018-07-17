@@ -69,13 +69,11 @@
     <Compile Include="..\broker-process\NamedPipe.cs">
       <Link>NamedPipe.cs</Link>
     </Compile>
-    <Compile Include="..\broker-process\UWP.cs">
-      <Link>UWP.cs</Link>
-    </Compile>
     <Compile Include="Converters.cs" />
     <Compile Include="MockConnection.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="UWP-mock.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

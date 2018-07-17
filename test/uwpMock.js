@@ -77,6 +77,11 @@ class AppServiceConnection extends EventTarget {
 		if (!this.proc.connected) return
 		if (this.proc.killed) return
 		try {
+			// can't stringify buffer. And UWP cannot pass Array through ValueSet.
+			// We only transform Buffers to and from Array for purposes of broker-tester. 
+			for (var [key, value] of Object.entries(req))
+				if (Buffer.isBuffer(value))
+					req[key] = Array.from(value)
 			this.proc.send(req)
 		} catch(err) {
 			console.warning('uwp-node mock was unable to sendMessageAsync()')

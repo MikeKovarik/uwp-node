@@ -10,7 +10,7 @@ using System.Text;
 using System.Linq;
 
 
-namespace UwpNodeBrokerTester {
+namespace UwpNodeBroker {
 
 	// NOTE: This isn't exact 1:1 mock of UWP's class. The RequestReceived event is bypassed and handled
 	// in custom manner to simplify code and prevent the necessity to have all handlers dynamic in UWP code.
@@ -30,7 +30,7 @@ namespace UwpNodeBrokerTester {
 
 		private void OnBytes(byte[] buffer) {
 			try {
-				jsonBuffer += Encoding.UTF8.GetString(buffer);
+				jsonBuffer += Encoding.Default.GetString(buffer);
 				List<string> messages = jsonBuffer.Split('\n').ToList();
 				var incomplete = messages.Last();
 				foreach (string message in messages.Take(messages.Count - 1)) {

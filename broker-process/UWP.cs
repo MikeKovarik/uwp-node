@@ -22,9 +22,7 @@ namespace UwpNodeBroker {
 		//       the app would then go on to create new background process, rather than reconnecting to this one.
 
 		// Connection to UWP app
-		// NOTE: It has to be dynamic to enable mocking during testing.
-		static public dynamic connection = null;
-		//static public AppServiceConnection connection = null;
+		static public AppServiceConnection connection = null;
 
 		static public bool isConnected {
 			get { return connection != null; }
@@ -61,12 +59,12 @@ namespace UwpNodeBroker {
 
 		static public async Task Connect() {
 			if (UWP.connection != null) return;
-			AppServiceConnection connection = UWP.connection = new AppServiceConnection();
+			connection = new AppServiceConnection();
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
 			connection.ServiceClosed += OnServiceClosed;
 			connection.RequestReceived += OnMessage;
-			AppServiceConnectionStatus status = await connection.OpenAsync();
+			var status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
 				Connected?.Invoke();
 			} else {
@@ -93,7 +91,6 @@ namespace UwpNodeBroker {
 		}
 
 		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
-			//MessageBox.Show("OnRequestReceived"); // TODO: delete
 			//var messageDeferral = e.GetDeferral();
 			// Handle message and let registered handlers do whatever's needed.
 			await EmitMessage(e.Request.Message);

@@ -4,7 +4,7 @@ using UwpNodeBroker;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 
-namespace UwpNodeBrokerTester {
+namespace UwpNodeBroker {
 
 	class Converters {
 		

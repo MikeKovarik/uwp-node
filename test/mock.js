@@ -16,19 +16,18 @@ process.on('uncaughtException', err => {
 	process.exit(1)
 })
 
-
+before(done => {
+	compileIfNeeded()
+		.then(() => mockUwp())
+		.then(() => done())
+})
+/*
+after(() => {
+	broker.kill()
+	broker.connection.proc.kill()
+})
+*/
 describe('uwp-node UWP mocked in console', function() {
-
-	this.timeout(5 * 1000)
-	before(async () => {
-		await compileIfNeeded()
-		await mockUwp()
-	})
-
-	after(() => {
-		broker.kill()
-		broker.connection.proc.kill()
-	})
 
 	require('./tests.js')
 
