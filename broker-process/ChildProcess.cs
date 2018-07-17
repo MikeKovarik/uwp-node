@@ -19,35 +19,34 @@ namespace UwpNodeBroker {
 		private NamedPipe[] Pipes;
 		private string[] Stdio = new string[0];
 
-		public int Pid;
 		public int Cid;
 		public bool Killed = false;
 		public event Action Disposed;
 
 
 		public ChildProcess(ValueSet req) {
-			this.req = req;
-			Proc = new Process();
-			// Read custom ID used to identify this process.
-			Cid = (int) req["cid"];
-			// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
-			// Or launched and blockingly waited out for exit - cp.exec().
-			var isLongRunning = req["startProcess"] as string == "spawn";
 			try {
+				this.req = req;
+				Proc = new Process();
+				// Read custom ID used to identify this process.
+				Cid = Convert.ToInt32(req["cid"]);
+				// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
+				// Or launched and blockingly waited out for exit - cp.exec().
+				var isLongRunning = req["startProcess"] as string == "spawn";
 				SetupInfo();
 				SetupStdio();
 				if (isLongRunning)
 					SetupStdioPipes();
+				// Start the process.
+				if (isLongRunning) {
+					// Long running with asynchronous evented STDIO.
+					Spawn();
+				} else {
+					// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
+					Task.Run(Exec);
+				}
 			} catch (Exception err) {
 				HandleError(err);
-			}
-			// Start the process.
-			if (isLongRunning) {
-				// Long running with asynchronous evented STDIO.
-				Spawn();
-			} else {
-				// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-				Task.Run(Exec);
 			}
 		}
 
@@ -60,7 +59,7 @@ namespace UwpNodeBroker {
 			// Request admin access if needed (prompts UAC dialog)
 			//if (req.ContainsKey("admin"))
 			//	Info.Verb = "runas";
-			// Setup what and where to start
+			// Setup file and to be started and with what arguments.
 			Info.FileName = req["file"] as string;
 			if (req.ContainsKey("args")) Info.Arguments        = req["args"] as string;
 			if (req.ContainsKey("cwd"))  Info.WorkingDirectory = req["cwd"] as string;
@@ -78,6 +77,9 @@ namespace UwpNodeBroker {
 			} else {
 				Stdio = new string[0];
 			}
+
+			Info.StandardOutputEncoding = Encoding.UTF8;
+			Info.StandardErrorEncoding = Encoding.UTF8;
 
 			// Request access to STDIO
 			if (Stdio.Length > 0 && Stdio[0] != null) Proc.StartInfo.RedirectStandardInput = true;
@@ -101,10 +103,10 @@ namespace UwpNodeBroker {
 				var pipe = new NamedPipe(name);
 				pipe.fd = fd;
 				// Handle and report all output and errors of the pipe.
-				pipe.Data += data => ReportData(data, pipe.fd);
-				pipe.Error += err => ReportError(err, pipe.fd);
+				pipe.Data += async data => await ReportData(data, pipe.fd);
+				pipe.Error += async err => await ReportError(err, pipe.fd);
 				// Pushing null to stream causes it to close and emit 'end' event.
-				pipe.End += () => ReportData(null, pipe.fd);
+				pipe.End += async () => await ReportData(null, pipe.fd);
 				Pipes[fd] = pipe;
 				fd++;
 			}
@@ -121,28 +123,71 @@ namespace UwpNodeBroker {
 		// Starts the process as long running with asynchronous evented STDIO.
 		public async void Spawn() {
 			try {
+				// Semaphore for STDOUT/STDERR and exited events.
+				// Exited event is in most cases emitted before OutputDataReceived and thus before reading STDIO
+				// was finished. Using these Task we can safely run after-exit code once all three Tasks are completed
+				// e.g. once STDOUT and STDERR are read and once Exited event is fired.
+				// Task objects th
+				var exitedEvent = new TaskCompletionSource<object>();
+				var stdoutEvent = new TaskCompletionSource<object>();
+				var stderrEvent = new TaskCompletionSource<object>();
+
 				// Handle lifecycle events
 				Proc.EnableRaisingEvents = true;
-				Proc.Exited   += OnExited;
-				Proc.Disposed += OnDisposed;
+				// Resolves one of the three events in semaphore.
+				Proc.Exited   += (s, e) => exitedEvent.SetResult(null);
+				// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
+				// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
+				Proc.Disposed += (s, e) => Dispose();
+
 				// Attach handlers for STDOUT and STDERR
 				// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
 				// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-				if (Info.RedirectStandardOutput)
-					Proc.OutputDataReceived += (s, e) => ReportData(e.Data == null ? null : e.Data + "\n", 1);
-				if (Info.RedirectStandardError)
-					Proc.ErrorDataReceived  += (s, e) => ReportData(e.Data == null ? null : e.Data + "\n", 2);
+				if (Info.RedirectStandardOutput) {
+					Proc.OutputDataReceived += async (s, e) => {
+						if (e.Data?.Length > 0) {
+							await ReportData(e.Data + "\n", 1);
+						} else if (e.Data == null) {
+							await ReportData(null, 1);
+							stdoutEvent.SetResult(null);
+						}
+					};
+				}
+				if (Info.RedirectStandardError) {
+					Proc.ErrorDataReceived += async (s, e) => {
+						if (e.Data?.Length > 0) {
+							await ReportData(e.Data + "\n", 2);
+						} else if (e.Data == null) {
+							await ReportData(null, 2);
+							stderrEvent.SetResult(null);
+						}
+					};
+				}
+
 				// Start the process and begin receiving data on STDIO streams.
 				Proc.Start();
 				if (Info.RedirectStandardOutput) Proc.BeginOutputReadLine();
 				if (Info.RedirectStandardError)  Proc.BeginErrorReadLine();
-				// Tell parent app about the newly spawned process and its PID.
-				Pid = Proc.Id;
+
 				// Report back first basic information about the established process.
-				var res = new ValueSet();
-				res.Add("cid", Cid);
-				res.Add("pid", Pid);
-				await UWP.Send(res);
+				await Report("pid", Proc.Id);
+
+				// Now that we reported PID and the process is running, await it's exit and 
+				await Task.WhenAll(exitedEvent.Task, stdoutEvent.Task, stderrEvent.Task);
+
+				// We can now safely report exit code and dispose the process and all references.
+				if (Killed) {
+					// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
+					await Report("exitCode", null);
+				} else {
+					try {
+						await Report("exitCode", Proc.ExitCode);
+					} catch {
+						await Report("exitCode", -1);
+					}
+				}
+
+				Dispose();
 			} catch (Exception err) {
 				HandleError(err);
 			}
@@ -153,15 +198,23 @@ namespace UwpNodeBroker {
 			try {
 				// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
 				Proc.Start();
-				Pid = Proc.Id;
 				var res = new ValueSet();
-				if (Info.RedirectStandardOutput) res.Add("stdout", Proc.StandardOutput.ReadToEnd());
-				if (Info.RedirectStandardError)  res.Add("stderr", Proc.StandardError.ReadToEnd());
+				if (Info.RedirectStandardOutput) {
+					var data = Proc.StandardOutput.ReadToEnd();
+					if (data?.Length > 0)
+						await ReportData(data, 1);
+					await ReportData(null, 1);
+				}
+				if (Info.RedirectStandardError) {
+					var data = Proc.StandardError.ReadToEnd();
+					if (data?.Length > 0)
+						await ReportData(data, 2);
+					await ReportData(null, 2);
+				}
 				// Synchronously block the task until the process exits.
 				Proc.WaitForExit();
 				// Report back information about the process.
-				res.Add("exitCode", Proc.ExitCode);
-				await Report(res);
+				await Report("exitCode", Proc.ExitCode);
 				// Close the process, release all resources and emit processClosed event.
 				Dispose();
 			} catch (Exception err) {
@@ -172,7 +225,7 @@ namespace UwpNodeBroker {
 		private async void HandleError(Exception err) {
 			switch (err.Message) {
 				case "The system cannot find the file specified":
-					await ReportExit(-4058); // ENOENT
+					await Report("exitCode", -4058); // ENOENT
 					break;
 				default:
 					await ReportError(err.Message, err.StackTrace);
@@ -180,6 +233,7 @@ namespace UwpNodeBroker {
 			}
 			Dispose();
 		}
+
 
 		///////////////////////////////////////////////////////////////////////
 		// IN / OUT
@@ -189,7 +243,7 @@ namespace UwpNodeBroker {
 		public async void Write(byte[] buffer, int fd = 0) {
 			if (fd == 0) {
 				// Writes data to STDIN.
-				string str = Encoding.UTF8.GetString(buffer, 0, buffer.Length);
+				string str = Encoding.Default.GetString(buffer, 0, buffer.Length);
 				await Proc.StandardInput.WriteAsync(str);
 				await Proc.StandardInput.FlushAsync();
 			} else if (fd > 2) {
@@ -226,41 +280,17 @@ namespace UwpNodeBroker {
 			await Report(message);
 		}
 
+		private async Task Report(string key, object val) {
+			ValueSet message = new ValueSet();
+			message.Add(key, val);
+			await Report(message);
+		}
+
 		private async Task Report(ValueSet message) {
 			message.Add("cid", Cid);
 			await UWP.Send(message);
 		}
 
-		// NOTE: has to be object due to null.
-		private async Task ReportExit(object exitCode) {
-			ValueSet message = new ValueSet();
-			message.Add("exitCode", exitCode);
-			await Report(message);
-		}
-
-
-		///////////////////////////////////////////////////////////////////////
-		// EVENTS
-		///////////////////////////////////////////////////////////////////////
-
-		private async void OnExited(object sender = null, EventArgs e = null) {
-			//Console.WriteLine("### OnExited ###");
-			if (Killed) {
-				// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
-				await ReportExit(null);
-			} else {
-				try {
-					await ReportExit(Proc.ExitCode);
-				} catch {
-					await ReportExit(-1);
-				}
-			}
-			Dispose();
-		}
-
-		// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
-		// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
-		private void OnDisposed(object sender = null, object e = null) => Dispose();
 
 		///////////////////////////////////////////////////////////////////////
 		// DISPOSE
@@ -277,8 +307,8 @@ namespace UwpNodeBroker {
 			//Console.WriteLine($"### Dispose {Cid}");
 			if (Proc != null) {
 				try {
-					Proc.Disposed -= OnDisposed;
-					Proc.Exited -= OnExited;
+					//Proc.Disposed -= OnDisposed;
+					//Proc.Exited -= OnExited;
 					Proc.Close();
 					Proc.Dispose();
 				} catch { }

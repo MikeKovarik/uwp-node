@@ -38,7 +38,7 @@ namespace UwpNodeBroker {
 				if (child == null) return;
 				// Handlers
 				if (req.ContainsKey("fd") && req.ContainsKey("data")) {
-					var fd = (int) req["fd"];
+					var fd = Convert.ToInt32(req["fd"]);
 					child.Write(req["data"] as byte[], fd);
 				} else if (req.ContainsKey("kill")) {
 					child.Kill();
@@ -61,7 +61,7 @@ namespace UwpNodeBroker {
 		}
 
 		static public ChildProcess GetProcess(ValueSet req) {
-			var cid = (int) req["cid"];
+			var cid = Convert.ToInt32(req["cid"]);
 			return Children.Find(child => child.Cid == cid);
 		}
 
