@@ -1,8 +1,8 @@
+var util = require('util')
 var {spawn, exec} = require('child_process')
 
-
 global.spawn = spawn
-global.exec = exec
+global.exec = util.promisify(exec)
 
 
 process.on('unhandledRejection', (reason, p) => {

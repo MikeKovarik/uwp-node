@@ -7,22 +7,88 @@ var {NODE, promiseEvent, promiseTimeout} = require('./test-util.js')
 // TODO: MORE TESTS:
 //       - exitcode tests, file that throws, self closing file, etc...
 
-var scriptEnv = './fixtures/child-env.js'
-var scriptSimple = './fixtures/simple.js'
-var scriptDelayed = './fixtures/simple-delayed.js'
-var scriptEndless = './fixtures/simple-endless.js'
-var scriptIpcBasic = './fixtures/child-ipc-basic.js'
+var scriptEnv         = './fixtures/child-env.js'
+var scriptArgs        = './fixtures/args.js'
+var scriptNewlines    = './fixtures/newlines.js'
+var scriptSimple      = './fixtures/simple.js'
+var scriptDelayed     = './fixtures/simple-delayed.js'
+var scriptEndless     = './fixtures/simple-endless.js'
+var scriptIpcBasic    = './fixtures/child-ipc-basic.js'
 var scriptIpcListener = './fixtures/child-ipc-listener.js'
-var scriptIpcComplex = './fixtures/child-ipc-complex.js'
+var scriptIpcComplex  = './fixtures/child-ipc-complex.js'
+var scriptWithSpaces  = './fixtures/name with spaces.js'
 
 describe('spawn', function() {
 
 
 	describe('basic scenarios', function() {
 
+		it(`spawning file instead of program throws or emits UNKNOWN serror`, async () => {
+			// Some node errors are sync. We can only get async errors.
+			var child
+			var err
+			try {
+				child = spawn('./fixtures/simple.js')
+				err = await promiseEvent(child, 'error')
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error, 'should throw or emit error')
+			assert.equal(err.code, 'UNKNOWN', 'error code should be UNKNOWN')
+		})
+
+
+		it(`stderr spits & exit code is 1 if node script is missing`, async () => {
+			var child = spawn(NODE, ['404.js'])
+			child.on('error', err => console.error(err))
+			var stdout = ''
+			var stderr = ''
+			child.stdout.on('data', data => stdout += data)
+			child.stderr.on('data', data => stderr += data)
+			var code = await promiseEvent(child, 'exit')
+			assert.isEmpty(stdout)
+			assert.isNotEmpty(stderr)
+			assert.equal(code, 1)
+		})
+
+		it(`missing program is missing emits 'error' event`, async () => {
+			var child = spawn('404.exe')
+			var exitFired = false
+			child.once('exit', code => exitFired = true)
+			var err = await promiseEvent(child, 'error')
+			assert.isDefined(err)
+			assert.include(err.message, 'ENOENT')
+			assert.equal(err.code, 'ENOENT')
+			assert.isNumber(child.exitCode)
+			assert.isBelow(child.exitCode, 0)
+			assert.isFalse(exitFired)
+		})
+		
+/*
+		it(`throws error for missing file`, async () => {
+			try {
+				var {stdout, stderr} = await exec(`"${NODE}" 404.js`)
+				console.log('stdout', stdout)
+				console.log('stderr', stderr)
+			} catch(err) {
+				console.log('ERR', err)
+			}
+		})
+*/
+
+		// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
+		it(`stdout properly handles newlines`, async () => {
+			var child = spawn(NODE, [scriptNewlines])
+			var stdout = ''
+			child.stdout.on('data', data => stdout += data)
+			await promiseEvent(child, 'exit')
+			var actual   = 'hello\nworld\r\nfoo\nbar\nk\nthx\nbye\n'
+			var expected = 'hello\nworld\nfoo\nbar\nk\nthx\nbye\n'
+			assert.equal(stdout, expected)
+		})
 
 		it(`process.env is not polluted`, async () => {
-			var stdio = 'pipe'
+			var stdio = [null, 'pipe', null, 'ipc']
 			var child = spawn(NODE, [scriptEnv], {stdio})
 			var json = ''
 			child.stdout.on('data', buffer => json += buffer)
@@ -30,6 +96,37 @@ describe('spawn', function() {
 			var env = JSON.parse(json)
 			var found = Object.keys(env).find(key => key.startsWith('uwp-node'))
 			assert.isUndefined(found, 'env should not conain uwp-node-* keys')
+		})
+
+		it(`args are not polluted`, async () => {
+			var child = spawn(NODE, [scriptArgs])
+			var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
+			assert.isEmpty(args)
+		})
+
+		it(`basic args support`, async () => {
+			var myArgs = ['first', 'second', 'third']
+			var child = spawn(NODE, [scriptArgs, ...myArgs])
+			var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
+			assert.deepEqual(args, myArgs)
+		})
+/*
+		it(`args are sanitized`, async () => {
+			var myArgs = ['hello world', '"foo bar"', 'éíý\n|]', 'k thx bye']
+			var child = spawn(NODE, [scriptArgs, ...myArgs])
+			var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
+			assert.deepEqual(args, myArgs)
+		})
+*/
+		it(`args are sanitized (filename with spaces)`, async () => {
+			var child = spawn(NODE, [scriptWithSpaces])
+			var args = await promiseEvent(child.stdout, 'data')
+			assert.deepEqual(args.toString().trim(), 'ok')
+		})
+
+		it(`args are sanitized (exec)`, async () => {
+			var {stdout} = await exec('echo "hello world"')
+			assert.deepEqual(stdout.trim(), '"hello world"')
 		})
 
 		it(`process closes if it doesnt have IPC`, async () => {

@@ -1,0 +1,6 @@
+process.stdout.write('hello\n')
+process.stdout.write('world\r\n')
+console.log('foo\nbar')
+console.log('k')
+console.log('thx')
+console.log('bye')
