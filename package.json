@@ -4,6 +4,15 @@
   "description": "TODO",
   "author": "Mike Kovarik",
   "license": "MIT",
+  "scripts": {
+    "prepublishOnly": "msbuild broker-process && rollup -c",
+    "build":          "msbuild broker-process && rollup -c",
+    "build-broker":   "msbuild broker-process",
+    "build-tester":   "msbuild broker-tester",
+    "build-test":     "msbuild broker-tester && rollup -c && mocha test/mock",
+    "build-lib":      "rollup -c",
+    "test":           "mocha test/mock"
+  },
   "devDependencies": {
     "chai": "^4.1.2",
     "mocha": "^5.2.0",
