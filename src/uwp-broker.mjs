@@ -52,7 +52,6 @@ if (isUwp || isUwpMock) {
 		}
 
 		_attachEventSource(eventSource) {
-			console.log('attaching event source')
 			// Newer API's since build 17692 allow listening on the BackgroundActivated event from JS.
 			// Unfortunately it is unstable. If the background fulltrust process crashes or closes, it causes
 			// "An unhandles win32 exception occurred in WWAHost.exe" error and crashes the whole app.
@@ -70,11 +69,13 @@ if (isUwp || isUwpMock) {
 			//console.log('from broker', JSON.stringify(valueSet))
 			if (valueSet.error && !valueSet.cid) {
 				//console.log('from broker A', JSON.stringify(valueSet))
+				console.error(valueSet)
+				var err = new Error('uwp-node broker: ' + valueSet.error)
+				err.stack = valueSet.stack
 				if (this._events.error && this._events.error.length) {
-					super.emit('error', valueSet.error) // TODO: maybe throw if there's no listener, like Node
+					super.emit('error', err) // TODO: maybe throw if there's no listener, like Node
 				} else {
-					var err = new Error('Uncaught uwp-node broker error')
-					err.stack = valueSet.error
+					console.error(err)
 					throw err
 				}
 			} else if (valueSet.ipc) {

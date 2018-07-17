@@ -61,8 +61,17 @@ namespace UwpNodeBroker {
 			//	Info.Verb = "runas";
 			// Setup file and to be started and with what arguments.
 			Info.FileName = req["file"] as string;
-			if (req.ContainsKey("args")) Info.Arguments        = req["args"] as string;
-			if (req.ContainsKey("cwd"))  Info.WorkingDirectory = req["cwd"] as string;
+			if (req.ContainsKey("args")) {
+				// C# strings are utf16 by default. Encoding of arguments property cannot be controlled
+				// like stdio streams with so we need to convert the args manually. 
+				var utf16 = req["args"] as string;
+				var buffer = Encoding.Default.GetBytes(utf16);
+				var utf8 = Encoding.UTF8.GetString(buffer, 0, buffer.Length);
+				Info.Arguments = utf8;
+			}
+			if (req.ContainsKey("cwd")) {
+				Info.WorkingDirectory = req["cwd"] as string;
+			}
 		}
 
 		private void SetupStdio() {

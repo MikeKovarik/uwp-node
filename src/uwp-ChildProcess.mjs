@@ -89,8 +89,8 @@ export class ChildProcess extends EventEmitter {
 			this.spawnargs = options.args
 		else if (options.args === undefined)
 			this.spawnargs = []
-		else
-			throw new ERR_INVALID_ARG_TYPE('options.args', 'Array', options.args)
+		//else
+		//	throw new ERR_INVALID_ARG_TYPE('options.args', 'Array', options.args)
 
 		options.cwd = options.cwd || process.cwd()
 		// 'spawn' - long running with asynchronous evented STDIO.
@@ -108,9 +108,24 @@ export class ChildProcess extends EventEmitter {
 		// Passing the important and custom fields to C#.
 		// UWP ValueSet does not accept arrays, so we have to stringify it.
 		options.stdio = options.stdio.join('|')
-		options.args = options.args.join(' ')
+		options.args = this._sanitizeAndFinalizeArgs(options.args)
 
 		broker._internalSend(options)
+	}
+
+	_sanitizeAndFinalizeArgs(args) {
+		if (typeof args === 'string')
+			return args
+		var regex = /\"/g
+		var replaceWith = '\\"'
+		return args
+			.map(arg => {
+				if (arg.includes(' '))
+					return `"${arg.replace(regex, replaceWith)}"`
+				else
+					return arg
+			})
+			.join(' ')
 	}
 
 	// Attaches current instance (now that we now PID of the remotely created process)
@@ -138,22 +153,17 @@ export class ChildProcess extends EventEmitter {
 		//console.log('_onMessage()', this.cid, JSON.stringify(res))
 		// Only accept messages with matching Custom Id of this process.
 		if (res.cid !== this.cid) return
+		if (res.pid !== null) this.pid = res.pid
 		if (res.exitCode !== undefined) this._onExit(res.exitCode)
 		if (res.fd !== undefined) {
 			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
 			var pipe = this._pipes[res.fd]
-			if (!pipe.readable) return
-			if (pipe._readableState.ended) return
-			if (res.pid !== null) this.pid = res.pid
-			if (res.data === null) {
-				// Underlying C# stream ended and sent null. Now we need to close the JS stream.
-				pipe.push(null)
-			} else if (res.data !== undefined) {
-				// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
-				// But we have to make it a Buffer ourselves (to make it use the U8A memory, instead of copying).
-				// Also works when we receive string instead of bytes.
-				pipe.push(Buffer.from(res.data))
-			}
+			if (!pipe || !pipe.readable || pipe._readableState.ended) return
+			// Underlying C# stream cand send null as the end of the stream. Pushing null to JS stream closes it.
+			// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
+			// But we have to make it a Buffer ourselves (to make it use the U8A memory, instead of copying).
+			// Also works when we receive string instead of bytes.
+			pipe.push(res.data === null ? null : Buffer.from(res.data))
 			// Emit error on the stream given by fd.
 			if (res.error) pipe.emit('error', new Error(res.error))
 		} else {

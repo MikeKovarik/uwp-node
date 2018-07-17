@@ -96,6 +96,8 @@ if (isUwp || isUwpMock) {
 	spawn = function(...spawnArgs) {
 		var {file, args, options} = normalizeSpawnArguments(...spawnArgs)
 		options.startProcess = 'spawn'
+		if (file === 'node' || file === 'node.exe')
+			file = process.execPath
 		options.file = file
 		options.args = args
 		var child = new ChildProcess()
@@ -113,9 +115,6 @@ if (isUwp || isUwpMock) {
 		// Make a shallow copy so we don't clobber the user's options object.
 		options = Object.assign({}, options)
 		//options.shell = typeof options.shell === 'string' ? options.shell : true
-		// TODO: parse command into file and args
-		options.file = command
-		options.args = []
 		return {command, options, callback}
 	}
 
@@ -123,15 +122,17 @@ if (isUwp || isUwpMock) {
 		var {command, options, callback} = normalizeExecArgs(...execArgs)
 		options.startProcess = 'exec'
 		options.shell = options.shell || 'cmd.exe'
-		var child = new ChildProcess()
-		child.spawn(options)
+		options.file = options.shell
+		options.args = '/C ' + command
 		var promise = new Promise((resolve, reject) => {
+			var child = new ChildProcess()
+			child.spawn(options)
 			var stdout = ''
 			var stderr = ''
 			child.stdout.on('data', buffer => stdout += buffer)
 			child.stderr.on('data', buffer => stderr += buffer)
-			child.stderr.once('error', reject)
-			child.stderr.once('exit', code => {
+			child.once('error', reject)
+			child.once('exit', code => {
 				if (code < 0)
 					reject()
 				else

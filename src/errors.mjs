@@ -33,10 +33,10 @@ export class ERR_INVALID_ARG_TYPE extends TypeError {
 		}
 		if (name.endsWith(' argument')) {
 			// For cases like 'first argument'
-			var msg = `The ${name} ${determiner} ${oneOf(expected, 'type')}`
+			var msg = `The ${name} ${determiner} ${expected}`
 		} else {
 			var type = name.includes('.') ? 'property' : 'argument'
-			var msg = `The "${name}" ${type} ${determiner} ${oneOf(expected, 'type')}`
+			var msg = `The "${name}" ${type} ${determiner} ${expected}`
 		}
 		msg += `. Received type ${typeof actual}`
 		super(msg)
