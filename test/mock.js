@@ -21,12 +21,12 @@ before(done => {
 		.then(() => mockUwp())
 		.then(() => done())
 })
-/*
+
 after(() => {
 	broker.kill()
 	broker.connection.proc.kill()
 })
-*/
+
 describe('uwp-node UWP mocked in console', function() {
 
 	require('./tests.js')
