@@ -23,7 +23,6 @@ namespace UwpNodeBroker {
 		public int Cid;
 		public bool Killed = false;
 		public event Action Disposed;
-		public Task Ready;
 
 
 		public ChildProcess(ValueSet req) {
@@ -45,10 +44,10 @@ namespace UwpNodeBroker {
 			// Start the process.
 			if (isLongRunning) {
 				// Long running with asynchronous evented STDIO.
-				Ready = Spawn();
+				Spawn();
 			} else {
 				// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-				Ready = Task.Run(() => Exec());
+				Task.Run(Exec);
 			}
 		}
 
@@ -120,7 +119,7 @@ namespace UwpNodeBroker {
 		}
 
 		// Starts the process as long running with asynchronous evented STDIO.
-		public async Task Spawn() {
+		public async void Spawn() {
 			try {
 				// Handle lifecycle events
 				Proc.EnableRaisingEvents = true;
@@ -211,26 +210,24 @@ namespace UwpNodeBroker {
 			ValueSet message = new ValueSet();
 			message.Add("fd", fd);
 			message.Add("error", err);
-			await Report(message, true);
+			await Report(message);
 		}
 
 		private async Task ReportError(string err, string stack) {
 			ValueSet message = new ValueSet();
 			message.Add("error", err);
 			message.Add("stack", stack);
-			await Report(message, true);
+			await Report(message);
 		}
 
 		private async Task ReportError(object err) {
 			ValueSet message = new ValueSet();
 			message.Add("error", err);
-			await Report(message, true);
+			await Report(message);
 		}
 
-		private async Task Report(ValueSet message, bool ignoreReady = false) {
+		private async Task Report(ValueSet message) {
 			message.Add("cid", Cid);
-			if (!ignoreReady && !Ready.IsCompleted)
-				await Ready;
 			await UWP.Send(message);
 		}
 
@@ -238,7 +235,7 @@ namespace UwpNodeBroker {
 		private async Task ReportExit(object exitCode) {
 			ValueSet message = new ValueSet();
 			message.Add("exitCode", exitCode);
-			await Report(message, true);
+			await Report(message);
 		}
 
 
