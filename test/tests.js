@@ -16,81 +16,81 @@ var scriptEndless     = './fixtures/simple-endless.js'
 var scriptIpcBasic    = './fixtures/child-ipc-basic.js'
 var scriptIpcListener = './fixtures/child-ipc-listener.js'
 var scriptIpcComplex  = './fixtures/child-ipc-complex.js'
-var scriptWithSpaces  = './fixtures/name with spaces.js'
 
 
 
 describe('internals', function() {
 })
 
-describe('args', function() {
+describe('spawn args sanitization and encoding', function() {
 
 	it(`basic args support`, async () => {
-		var myArgs = ['first', 'second', 'third']
-		var child = spawn(NODE, [scriptArgs, ...myArgs])
-		var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
-		assert.deepEqual(args, myArgs)
+		var args = ['first', 'second', 'third']
+		var child = spawn(NODE, [scriptArgs, ...args])
+		var output = JSON.parse(await promiseEvent(child.stdout, 'data'))
+		assert.deepEqual(output, args)
 	})
 
-	it(`args are sanitized`, async () => {
-		var myArgs = ['hello world', '"C:\\Program Filles/node"', 'k\nthx\nbye']
-		var child = spawn(NODE, [scriptArgs, ...myArgs])
-		var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
-		assert.deepEqual(args, myArgs)
-	})
 
-	it(`args are sanitized (filename with spaces)`, async () => {
-		var arg = 'foobar'
-		var child = spawn(NODE, [scriptWithSpaces, arg])
-		var args = await promiseEvent(child.stdout, 'data')
-		assert.deepEqual(args.toString().trim(), arg)
-	})
-/*
-	it(`args are sanitized (exec)`, async () => {
-		var {stdout} = await exec('echo "hello world"')
-		assert.deepEqual(stdout.trim(), '"hello world"')
-	})
-*/
-
-	function testSanitizeSpaceSpawn(input, expected) {
-		it(`spawn args spaces and quotes ${input} => ${expected}`, async () => {
-			var child = spawn('cmd.exe', ['/c', 'echo', input])
+	function testSanitizeArgsSpawn(...args) {
+		it(`args are sanitized: ${args.join(' ').replace(/\n/g, '\\n')}`, async () => {
+			var child = spawn(NODE, [scriptArgs, ...args])
 			var stdout = await promiseEvent(child.stdout, 'data')
-			assert.equal(stdout.toString().trim(), expected)
+			var output = JSON.parse(stdout)
+			assert.deepEqual(output, args)
 		})
 	}
 
-	function testSanitizeSpaceExec(input, expected) {
-		it(`exec args spaces and quotes ${input} => ${expected}`, async () => {
-			var {stdout} = await exec(`echo ${input}`)
-			assert.equal(stdout.trim(), expected)
-		})
-	}
-
-	testSanitizeSpaceExec( 'hello',  'hello')
-	testSanitizeSpaceSpawn( 'hello',  'hello')
-	testSanitizeSpaceExec( 'hello world',  'hello world')
-	testSanitizeSpaceSpawn('hello world', '"hello world"')
-	testSanitizeSpaceExec( '"hello world"',    '"hello world"')
-	testSanitizeSpaceSpawn('"hello world"', '"\\"hello world\\""')
-	testSanitizeSpaceExec( '""hello world""', '""hello world""')
-	testSanitizeSpaceSpawn('""hello world""', '"\\"\\"hello world\\"\\""')
-	testSanitizeSpaceExec( '"""hello world"""',        '"""hello world"""')
-	testSanitizeSpaceSpawn('"""hello world"""', '"\\"\\"\\"hello world\\"\\"\\""')
-	testSanitizeSpaceExec( '"hello" "world"', '"hello" "world"')
-	testSanitizeSpaceSpawn('"hello" "world"', '"\\"hello\\" \\"world\\""')
-	testSanitizeSpaceExec( '\'hello\' \'world\'',  '\'hello\' \'world\'')
-	testSanitizeSpaceSpawn('\'hello\' \'world\'', '"\'hello\' \'world\'"')
-	testSanitizeSpaceExec( '`hello world`',  '`hello world`')
-	testSanitizeSpaceSpawn('`hello world`', '"`hello world`"')
-	testSanitizeSpaceExec( '\'hello world\'',  '\'hello world\'')
-	testSanitizeSpaceSpawn('\'hello world\'', '"\'hello world\'"')
+	// basics
+	testSanitizeArgsSpawn(' ')
+	testSanitizeArgsSpawn('\'')
+	testSanitizeArgsSpawn('\"')
+	testSanitizeArgsSpawn('\\')
+	testSanitizeArgsSpawn('\s')
+	testSanitizeArgsSpawn('\t')
+	testSanitizeArgsSpawn('\n')
+	testSanitizeArgsSpawn('€')
+	testSanitizeArgsSpawn('💀')
+	testSanitizeArgsSpawn('~!@#$%^^^&*()_+^|-=^\][{}\';:\"/.^>?,^<')
+	// more
+	testSanitizeArgsSpawn('hello')
+	testSanitizeArgsSpawn('"hello"')
+	testSanitizeArgsSpawn('hello world')
+	testSanitizeArgsSpawn('"hello world"')
+	testSanitizeArgsSpawn('""hello world""')
+	testSanitizeArgsSpawn('"""hello world"""')
+	// seemingly two in one
+	testSanitizeArgsSpawn('"hello" "world"')
+	// different quotes
+	testSanitizeArgsSpawn('`hello world`')
+	testSanitizeArgsSpawn('\'hello world\'')
+	// slashes and escaping
+	testSanitizeArgsSpawn('\\"hello\\"')
+	testSanitizeArgsSpawn('foo\nbar')
+	testSanitizeArgsSpawn('foo bar')
+	testSanitizeArgsSpawn('foo bar\\')
+	// more complex
+	testSanitizeArgsSpawn('"test\\"\\"123\\"\\"234"')
+	testSanitizeArgsSpawn('\'hello\' \'world\'')
+	// clusterfuck
+	testSanitizeArgsSpawn('hello world', '"C:\\Program Filles/node"', 'k\nthx\nbye')
+	testSanitizeArgsSpawn("arg1", "an argument with whitespace", 'even some "quotes"')
+	// what the hell?
+	testSanitizeArgsSpawn('\\"hello\\ world')
+	testSanitizeArgsSpawn('\\hello\\12\\3\\')
+	testSanitizeArgsSpawn('hello world\\')
+	testSanitizeArgsSpawn('\\ ')
+	testSanitizeArgsSpawn('\\foo bar')
+	testSanitizeArgsSpawn('foo\\bar')
+	testSanitizeArgsSpawn('foo\\ bar')
+	testSanitizeArgsSpawn('foo \\bar')
+	testSanitizeArgsSpawn('foo\\nbar')
 
 
 })
 
 
-describe('encoding', function() {
+describe('stdio encoding', function() {
 
 	it(`should receive ě on stdout`, async () => {
 		var child = spawn(NODE, ['./fixtures/encoding1.js'])
@@ -120,58 +120,104 @@ describe('encoding', function() {
 
 describe('errors', function() {
 
-	it(`spawning file instead of program throws or emits UNKNOWN serror`, async () => {
-		// Some node errors are sync. We can only get async errors.
-		var child
-		var err
-		try {
-			child = spawn('./fixtures/simple.js')
-			err = await promiseEvent(child, 'error')
-		} catch(error) {
-			err = error
-		}
-		assert.instanceOf(err, Error, 'should throw or emit error')
-		assert.equal(err.code, 'UNKNOWN', 'error code should be UNKNOWN')
+	describe('spawn', () => {
+
+		it(`file instead of program - throws UNKNOWN or emits 'error'`, async () => {
+			// Some node errors are sync. We can only get async errors.
+			var child
+			var err
+			try {
+				child = spawn(scriptSimple)
+				err = await promiseEvent(child, 'error')
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error, 'should throw or emit error')
+			assert.equal(err.code, 'UNKNOWN', 'error code should be UNKNOWN')
+		})
+
+		it(`non-existent node script - emits 'stderr' logs & exit code is 1`, async () => {
+			var child = spawn(NODE, ['404.js'])
+			child.on('error', err => console.error(err))
+			var stdout = ''
+			var stderr = ''
+			child.stdout.on('data', data => stdout += data)
+			child.stderr.on('data', data => stderr += data)
+			var code = await promiseEvent(child, 'exit')
+			assert.isEmpty(stdout)
+			assert.isNotEmpty(stderr)
+			assert.equal(code, 1)
+		})
+
+		it(`non-existent exe program - emits 'error'`, async () => {
+			var child = spawn('404.exe')
+			var exitFired = false
+			child.once('exit', code => exitFired = true)
+			var err = await promiseEvent(child, 'error')
+			assert.isDefined(err)
+			assert.include(err.message, 'ENOENT')
+			assert.equal(err.code, 'ENOENT')
+			assert.isNumber(child.exitCode)
+			assert.isBelow(child.exitCode, 0)
+			assert.isFalse(exitFired)
+		})
+
 	})
 
+	describe('exec', () => {
 
-	it(`stderr spits & exit code is 1 if node script is missing`, async () => {
-		var child = spawn(NODE, ['404.js'])
-		child.on('error', err => console.error(err))
-		var stdout = ''
-		var stderr = ''
-		child.stdout.on('data', data => stdout += data)
-		child.stderr.on('data', data => stderr += data)
-		var code = await promiseEvent(child, 'exit')
-		assert.isEmpty(stdout)
-		assert.isNotEmpty(stderr)
-		assert.equal(code, 1)
+		it(`file instead of program - throws exit code 1, includes stderr`, async () => {
+			var err
+			try {
+				await exec(scriptSimple)
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error, 'should throw error')
+			assert.include(err.message, 'Command failed')
+			assert.include(err.message, scriptSimple)
+			assert.isString(err.stdout)
+			assert.isString(err.stderr)
+			assert.isEmpty(err.stdout)
+			assert.isNotEmpty(err.stderr) // the cmd stuff about not recognized command
+			assert.equal(err.cmd, scriptSimple)
+			assert.equal(err.code, 1)
+		})
+
+		it(`non-existent node script - throws, exit code 1, includes stderr`, async () => {
+			var cmd = `"${NODE}" 404.js`
+			var err
+			try {
+				await exec(cmd)
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error, 'should throw error')
+			assert.include(err.message, 'Command failed')
+			assert.include(err.message, '404.js')
+			assert.isString(err.stdout)
+			assert.isString(err.stderr)
+			assert.isEmpty(err.stdout)
+			assert.include(err.stderr, 'Cannot find module')
+			assert.equal(err.cmd, cmd)
+			assert.equal(err.code, 1)
+		})
+
+		it(`non-existent program - throws, exit code 1, includes stderr`, async () => {
+			var err
+			try {
+				await exec(`404.exe`)
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error, 'should throw error')
+			assert.isString(err.stdout)
+			assert.isString(err.stderr)
+			assert.equal(err.code, 1)
+		})
+
 	})
 
-	it(`missing program is missing emits 'error' event`, async () => {
-		var child = spawn('404.exe')
-		var exitFired = false
-		child.once('exit', code => exitFired = true)
-		var err = await promiseEvent(child, 'error')
-		assert.isDefined(err)
-		assert.include(err.message, 'ENOENT')
-		assert.equal(err.code, 'ENOENT')
-		assert.isNumber(child.exitCode)
-		assert.isBelow(child.exitCode, 0)
-		assert.isFalse(exitFired)
-	})
-
-/*
-	it(`throws error for missing file`, async () => {
-		try {
-			var {stdout, stderr} = await exec(`"${NODE}" 404.js`)
-			console.log('stdout', stdout)
-			console.log('stderr', stderr)
-		} catch(err) {
-			console.log('ERR', err)
-		}
-	})
-*/
 })
 
 describe('cleanup & pollution', function() {
