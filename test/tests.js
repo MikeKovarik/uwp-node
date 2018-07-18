@@ -15,12 +15,10 @@ var scriptDelayed     = './fixtures/simple-delayed.js'
 var scriptEndless     = './fixtures/simple-endless.js'
 var scriptIpcBasic    = './fixtures/child-ipc-basic.js'
 var scriptIpcListener = './fixtures/child-ipc-listener.js'
+var scriptIpcSender   = './fixtures/child-ipc-sender.js'
 var scriptIpcComplex  = './fixtures/child-ipc-complex.js'
 
 
-
-describe('internals', function() {
-})
 
 describe('spawn args sanitization and encoding', function() {
 
@@ -117,6 +115,7 @@ describe('stdio encoding', function() {
 	})
 
 })
+
 
 describe('errors', function() {
 
@@ -241,6 +240,7 @@ describe('cleanup & pollution', function() {
 
 })
 
+
 describe('basic stdio', function() {
 
 	// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
@@ -271,6 +271,118 @@ describe('basic stdio', function() {
 	})
 
 })
+
+
+describe('public IPC', () => {
+	// child.send({message: 'text'})
+	// process.on('message', message => console.log(message))
+
+	describe(`parent sends message via child.send(), child receives it via process.on('message')`, () => {
+
+		function basicIpcMessage(message) {
+			if (message === null)
+				var type = 'null'
+			else if (Array.isArray(message))
+				var type = 'Array'
+			else if (Buffer.isBuffer(message))
+				var type = 'Buffer'
+			else
+				var type = message.constructor.name
+			it(`${type}`, async () => {
+				var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+				var child = spawn(NODE, [scriptIpcListener], {stdio})
+				child.send(message)
+				var output = JSON.parse(await promiseEvent(child.stdout, 'data'))
+				assert.deepEqual(output, message)
+			})
+		}
+
+		basicIpcMessage(null)
+		basicIpcMessage(45)
+		basicIpcMessage(true)
+		basicIpcMessage(false)
+		basicIpcMessage('hello world')
+		basicIpcMessage(['Zenyatta', 'Moira', 'Winston'])
+		basicIpcMessage({foo: 'bar'})
+
+		it(`Buffer`, async () => {
+			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+			var child = spawn(NODE, [scriptIpcListener], {stdio})
+			var array = [0, 1, 2, 3]
+			var buffer = Buffer.from(array)
+			child.send(buffer)
+			var output = JSON.parse(await promiseEvent(child.stdout, 'data'))
+			// Buffer is not reconstructed as Buffer instance.
+			// Instead it's an object with 'type' and 'data' fields.
+			assert.equal(output.type, 'Buffer')
+			assert.deepEqual(output.data, array)
+		})
+
+		it(`undefined sends nothing and throws`, async () => {
+			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+			var child = spawn(NODE, [scriptIpcListener], {stdio})
+			var err
+			try {
+				child.send(undefined)
+			} catch(error) {
+				err = error
+			}
+			assert.instanceOf(err, Error)
+			child.kill()
+		})
+
+	})
+
+	describe(`child sends message via process.send(), parent receives it via child.on('message')`, () => {
+
+		it(`receives messages`, async () => {
+			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+			var child = spawn(NODE, [scriptIpcSender], {stdio})
+			var messages = []
+			child.on('message', message => messages.push(message))
+			await promiseEvent(child, 'exit')
+			assert.isNotEmpty(messages)
+		})
+
+		it(`receives all messages in correct order`, async () => {
+			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+			var child = spawn(NODE, [scriptIpcSender], {stdio})
+			var messages = []
+			child.on('message', message => messages.push(message))
+			await promiseEvent(child, 'exit')
+			assert.isNotEmpty(messages)
+			assert.equal(messages.length, 7)
+		})
+
+		it(`receives correct types`, async () => {
+			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+			var child = spawn(NODE, [scriptIpcSender], {stdio})
+			var messages = []
+			child.on('message', message => messages.push(message))
+			await promiseEvent(child, 'exit')
+			assert.equal(messages[0], null)
+			assert.equal(messages[1], 20)
+			assert.equal(messages[2], true)
+			assert.equal(messages[3], 'Nothing is true')
+			assert.isArray(messages[4])
+			assert.isObject(messages[5])
+			// Buffer is not reconstructed as Buffer instance.
+			// Instead it's an object with 'type' and 'data' fields.
+			assert.isObject(messages[6])
+			assert.equal(messages[6].type, 'Buffer')
+			assert.equal(messages[6].data.length, 5)
+		})
+
+	})
+
+})
+
+
+describe('internal IPC', function() {
+	// used for internal commands between broker and child scripts like
+	// when bg script triggers broker to open UWP app.
+})
+
 
 describe(`basic closing and killing, 'exit' & 'close' events`, function() {
 
