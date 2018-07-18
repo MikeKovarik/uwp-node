@@ -133,10 +133,18 @@ if (isUwp || isUwpMock) {
 			child.stderr.on('data', buffer => stderr += buffer)
 			child.once('error', reject)
 			child.once('exit', code => {
-				if (code < 0)
-					reject()
-				else
+				if (code !== 0) {
+					var err = new Error(`Command failed: ${command}`)
+					err.cmd = command
+					err.code = code
+					err.stdout = stdout
+					err.stderr = stderr
+					err.killed = child.killed
+					err.signal = child.signalCode
+					reject(err)
+				} else {
 					resolve({stdout, stderr})
+				}
 			})
 		})
 		if (callback) {

@@ -84,3 +84,46 @@ export function createNamedPipe(name) {
 	})
 	return channel
 }
+
+// Escaping strings for use as CMD arguments is madness.
+// It's a world of smoke and mirrors.
+// Nothing is true. Everything is permitted.
+// No mortal can enter this loopyland without loosing his mind.
+// Matthew 13:50 - ...There shall be wailing and gnashing of teeth.
+// Fly you fools! Save yourself!
+// Following code is taken from http://gfxmonk.net/2014/04/25/escaping-an-array-of-command-line-arguments-in-csharp.html
+// to save the last remnants of my sanity.
+function escapeCsharpArgument(arg) {
+	var backslashes = 0
+	var out = ''
+	arg.split('').forEach(c => {
+		if (c == '\\') {
+			// Don't know if we need to double yet.
+			backslashes++
+		} else if (c == '"') {
+			// Double backslashes.
+			out += '\\'.repeat(backslashes * 2)
+			backslashes = 0
+			out += "\\\""
+		} else {
+			// Normal char
+			if (backslashes > 0) {
+				out += '\\'.repeat(backslashes)
+				backslashes = 0
+			}
+			out += c
+		}
+	})
+	// Add remaining backslashes, if any.
+	if (backslashes > 0)
+		out += '\\'.repeat(backslashes)
+	out += '\\'.repeat(backslashes)
+	return out
+}
+
+export function escapeCsharpArguments(args) {
+	return args
+		.map(escapeCsharpArgument)
+		.map(arg => `"${arg}"`)
+		.join(' ')
+}

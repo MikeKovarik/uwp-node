@@ -192,7 +192,8 @@ namespace UwpNodeBroker {
 					try {
 						await Report("exitCode", Proc.ExitCode);
 					} catch {
-						await Report("exitCode", -1);
+						// general error
+						await Report("exitCode", 1);
 					}
 				}
 

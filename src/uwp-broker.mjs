@@ -66,23 +66,18 @@ if (isUwp || isUwpMock) {
 		
 		_onRequestReceived(e) {
 			var valueSet = e.request.message
-			//console.log('from broker', JSON.stringify(valueSet))
 			if (valueSet.error && !valueSet.cid) {
-				//console.log('from broker A', JSON.stringify(valueSet))
-				console.error(valueSet)
 				var err = new Error('uwp-node broker: ' + valueSet.error)
 				err.stack = valueSet.stack
 				if (this._events.error && this._events.error.length) {
-					super.emit('error', err) // TODO: maybe throw if there's no listener, like Node
+					// TODO: take into account internal listeners
+					super.emit('error', err)
 				} else {
-					console.error(err)
 					throw err
 				}
 			} else if (valueSet.ipc) {
-				//console.log('from broker B', JSON.stringify(valueSet))
 				super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
 			} else {
-				//console.log('from broker C', JSON.stringify(valueSet))
 				super.emit('internalMessage', valueSet)
 			}
 		}

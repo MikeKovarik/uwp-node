@@ -1,7 +1,7 @@
 import {EventEmitter} from 'events'
 import {Readable, Writable, Duplex} from 'stream'
 import {broker} from './uwp-broker.mjs'
-import {setupChannel} from './util.mjs'
+import {setupChannel, escapeCsharpArguments} from './util.mjs'
 import {
 	ERR_INVALID_OPT_VALUE,
 	ERR_INVALID_ARG_TYPE,
@@ -108,25 +108,13 @@ export class ChildProcess extends EventEmitter {
 		// Passing the important and custom fields to C#.
 		// UWP ValueSet does not accept arrays, so we have to stringify it.
 		options.stdio = options.stdio.join('|')
-		options.args = this._sanitizeAndFinalizeArgs(options.args)
+
+		if (Array.isArray(options.args))
+			options.args = escapeCsharpArguments(options.args)
 
 		broker._internalSend(options)
 	}
 
-	_sanitizeAndFinalizeArgs(args) {
-		if (typeof args === 'string')
-			return args
-		var regex = /\"/g
-		var replaceWith = '\\"'
-		return args
-			.map(arg => {
-				if (arg.includes(' '))
-					return `"${arg.replace(regex, replaceWith)}"`
-				else
-					return arg
-			})
-			.join(' ')
-	}
 
 	// Attaches current instance (now that we now PID of the remotely created process)
 	// to the uwp-node broker process that notifies us about all of STDIO and custom pipes
@@ -228,7 +216,7 @@ export class ChildProcess extends EventEmitter {
 		this.exitCode = exitCode
 		setTimeout(() => {
 			// NOTE: killing the process with .kill() results in exitCode=null. It should not throw.
-			if (exitCode !== null && exitCode < 0) {
+			if (exitCode < 0) {
 				var syscall = this.spawnfile ? 'spawn ' + this.spawnfile : 'spawn'
 				var err = errnoException(exitCode, syscall)
 				this._handleError(err)
