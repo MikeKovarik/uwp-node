@@ -334,6 +334,8 @@ export class ChildProcess extends EventEmitter {
 		// If FDs or 'ignore' instead of 'pipe' these pipes are also null in this.stdio.
 		this.stdio = this._stdioAll.slice(0)
 
+		// Iterate over stdio array (types, FDs, custom streams) and use it to hide unreachable streams
+		// from this.stdio which only includes child's streams.
 		stdio.forEach((type, fd) => {
 			if (type === 'ignore' || typeof type === 'number') {
 				// 'ignore'/null don't exist to begin with, numeric FDs signify routing which makes it unaccessible.
@@ -351,6 +353,7 @@ export class ChildProcess extends EventEmitter {
 			}
 		})
 
+		// Assign basic stdio to child process instance.
 		this.stdin  = this.stdio[0] || null
 		this.stdout = this.stdio[1] || null
 		this.stderr = this.stdio[2] || null
