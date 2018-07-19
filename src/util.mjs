@@ -1,6 +1,10 @@
 import fs from 'fs'
 import {Socket} from 'net'
-import {ERR_IPC_CHANNEL_CLOSED, ERR_IPC_DISCONNECTED} from './errors.mjs'
+import {
+	ERR_MISSING_ARGS,
+	ERR_IPC_CHANNEL_CLOSED,
+	ERR_IPC_DISCONNECTED
+} from './errors.mjs'
 
 
 export var isUwp = typeof Windows !== 'undefined' && typeof MSApp !== 'undefined'
@@ -21,29 +25,47 @@ export function handleStreamJson(channel, callback) {
 	return handler
 }
 
+
 // Creates .send() method on target that wraps every sent message into \n delimeted JSONs
 // and unwraps and parses incoming data (from channel) and exposes it as 'message' event.
 export function setupChannel(target, channel) {
+
 	Object.defineProperty(target, 'connected', {
 		get: () => channel.connected,
 		set: val => channel.connected = val,
 	})
+
 	target.channel = channel
-	target.send = object => {
-		if (channel.connected)
-			channel.write(JSON.stringify(object) + '\n')
-		else
-			target.emit('error', new ERR_IPC_CHANNEL_CLOSED())
+
+	target.send = (message, callback) => {
+		if (message === undefined)
+			throw new ERR_MISSING_ARGS('message')
+		if (channel.connected) {
+			channel.write(JSON.stringify(message) + '\n', callback)
+		} else {
+			var err = new ERR_IPC_CHANNEL_CLOSED()
+			if (callback)
+				callback(err)
+			else
+				setTimeout(() => target.emit('error', err))
+		}
 	}
+
 	target.disconnect = () => {
-		if (!channel.connected)
-			return target.emit('error', new ERR_IPC_DISCONNECTED())
+		if (!channel.connected) {
+			target.emit('error', new ERR_IPC_DISCONNECTED())
+			return
+		}
 		// Do not allow any new messages to be written.
 		channel.connected = false
 		console.warn('disconnect() not implemented') // TODO
 	}
+
+	channel.once('end', () => channel.connected = false)
+
 	handleStreamJson(channel, object => target.emit('message', object))
 }
+
 
 // replica of Node's path.join()
 export function joinPath(...segments) {
