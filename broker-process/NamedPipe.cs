@@ -3,19 +3,28 @@ using System.Collections.Generic;
 using System.IO.Pipes;
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
+
 
 namespace UwpNodeBroker {
 
 	class NamedPipe {
 
-		List<NamedPipeServerStream> pipes = new List<NamedPipeServerStream>();
-		List<NamedPipeServerStream> connections = new List<NamedPipeServerStream>();
+		List<NamedPipeServerStream> Pipes = new List<NamedPipeServerStream>();
+		List<NamedPipeServerStream> Connections = new List<NamedPipeServerStream>();
 
-		public event Action<byte[]> Data;
+		private TaskCompletionSource<bool> Ready = new TaskCompletionSource<bool>();
+
 		public event Action Connection;
+		public event Action<byte[]> Data;
 		public event Action End;
 		public event Action<string> Error;
 
+		public bool Connected {
+			get { return Connections.Count > 0; }
+		}
+
+		public bool Disposed = false;
 		public string name;
 		public int fd;
 		int chunksize = 665536;
@@ -34,27 +43,30 @@ namespace UwpNodeBroker {
 			NamedPipeServerStream pipe = null;
 			try {
 				pipe = new NamedPipeServerStream(name, direction, maxInstances, mode, options, chunksize, chunksize);
-				pipes.Add(pipe);
+				Pipes.Add(pipe);
 				StartListening(pipe);
 			} catch (Exception err) {
+				Ready.SetResult(false);
 				OnError(pipe, err);
 			}
 		}
 
 		private void StartListening(NamedPipeServerStream pipe) => Task.Factory.StartNew(() => {
 			try {
-			pipe.WaitForConnection();
-			// Client connected to this server.
-			connections.Add(pipe);
-			// Fire connection event.
+				pipe.WaitForConnection();
+				// Client connected to this server.
+				Connections.Add(pipe);
+				// Fire connection event.
 				Connection?.Invoke();
-			// Start another parallel stream server if needed.
-			if (maxInstances > pipes.Count)
-				CreateNewPipe();
-			StartReading(pipe);
+				Ready.SetResult(true);
+				// Start another parallel stream server if needed.
+				if (maxInstances > Pipes.Count)
+					CreateNewPipe();
+				StartReading(pipe);
 			} catch {
 				//Console.WriteLine($"Pipe {name} did not start listening");
-				Dispose(pipe);
+				Ready.SetResult(false);
+				DisposePipe(pipe);
 			}
 		});
 
@@ -84,61 +96,58 @@ namespace UwpNodeBroker {
 		});
 
 		private void OnDisconnect(NamedPipeServerStream pipe) {
-			ClosePipe(pipe);
-			End?.Invoke();
-			End = null;
+			DisposePipe(pipe);
+			if (Connections.Count == 0)
+				Dispose();
 		}
 
 		private void OnError(NamedPipeServerStream pipe, Exception err) {
-			ClosePipe(pipe);
+			DisposePipe(pipe);
 			Error?.Invoke(err.ToString());
+			if (Connections.Count == 0)
+				Dispose();
 		}
 
-		private void ClosePipe(NamedPipeServerStream pipe) {
-			if (pipes.Contains(pipe))
-				pipes.Remove(pipe);
-			if (connections.Contains(pipe))
-				connections.Remove(pipe);
+		public void DisposePipe(NamedPipeServerStream pipe) {
+			if (pipe == null)
+				return;
+			if (Pipes.Contains(pipe))
+				Pipes.Remove(pipe);
+			if (Connections.Contains(pipe))
+				Connections.Remove(pipe);
+			try {
+				pipe.Disconnect();
+			} catch { }
+			pipe.Dispose();
 		}
 
 		public void Dispose() {
-			foreach (var pipe in pipes) {
-				Dispose(pipe);
-			}
+			while (Pipes.Count > 0)
+				DisposePipe(Pipes[0]);
 			End?.Invoke();
 			// Remove references to event handlers.
 			Data = null;
 			Connection = null;
 			End = null;
 			Error = null;
+			Disposed = true;
 		}
-		public void Dispose(NamedPipeServerStream pipe) {
-			if (pipe == null)
-				return;
-				try {
-					pipe.Disconnect();
-				} catch { }
-				pipe.Dispose();
-			}
 
 		public async Task Write(string message) {
 			byte[] buffer = Encoding.UTF8.GetBytes(message);
 			await Write(buffer);
 		}
 
-		public async Task Write(byte[] buffer, object pipeToExclude = null) {
-			List<Task> tasks = new List<Task>();
-			//if (pipeToExclude != null)
-			//    pipeToExclude = pipeToExclude as NamedPipeServerStream;
-			foreach (var pipe in connections) {
-				if (pipe.CanWrite && pipe != pipeToExclude) {
-					var task = Task.Run(async () => {
-						await pipe.WriteAsync(buffer, 0, buffer.Length);
-						await pipe.FlushAsync();
-					});
-					tasks.Add(task);
-				}
-			}
+		public async Task Write(byte[] buffer, NamedPipeServerStream exclude = null) {
+			if (Disposed) return;
+			if (!Connected) await Ready.Task;
+			var tasks = Connections
+				.Where(pipe => pipe.CanWrite && pipe != exclude)
+				.Select(pipe => Task.Run(async () => {
+					await pipe.WriteAsync(buffer, 0, buffer.Length);
+					await pipe.FlushAsync();
+				}))
+				.ToList();
 			await Task.WhenAll(tasks);
 		}
 

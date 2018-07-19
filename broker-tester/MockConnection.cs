@@ -60,7 +60,6 @@ namespace UwpNodeBroker {
 			var json = Converters.ValueSetToJson(valueset);
 			await pipe.Write(json + "\n");
 			//Console.WriteLine($"> SENT {json}");
-			//Console.WriteLine("SENT TO UWP");
 		}
 
 		public void Dispose() {

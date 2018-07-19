@@ -1,8 +1,11 @@
 var util = require('util')
 var {spawn, exec} = require('child_process')
 
+
+
 global.spawn = spawn
 global.exec = util.promisify(exec)
+global.isMock = false
 
 
 process.on('unhandledRejection', (reason, p) => {

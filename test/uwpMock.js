@@ -84,9 +84,9 @@ class AppServiceConnection extends EventTarget {
 					req[key] = Array.from(value)
 			this.proc.send(req)
 		} catch(err) {
-			console.warning('uwp-node mock was unable to sendMessageAsync()')
-			console.warning(req)
-			console.warning(err)
+			console.warn('uwp-node mock was unable to sendMessageAsync()')
+			console.warn(req)
+			console.warn(err)
 		}
 	}
 

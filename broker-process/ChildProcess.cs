@@ -256,10 +256,9 @@ namespace UwpNodeBroker {
 				string str = Encoding.Default.GetString(buffer, 0, buffer.Length);
 				await Proc.StandardInput.WriteAsync(str);
 				await Proc.StandardInput.FlushAsync();
-			} else if (fd > 2) {
+			} else if (fd > 2 && fd < Pipes.Length) {
 				// Writes data to custom named pipes.
-				if (Pipes.Length < fd && Pipes[fd] != null)
-					await Pipes[fd].Write(buffer);
+				await Pipes[fd]?.Write(buffer);
 			}
 		}
 

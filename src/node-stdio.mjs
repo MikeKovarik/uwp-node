@@ -34,27 +34,31 @@ if (isNode) {
 		// start handling incomming data and parsing it as 'message' events.
 		// But only when and if either process.send() is called, or 'message'
 		// event listened to.
-		function setupIpc() {
-			let ipcChannel = createNamedPipe(ipcPipeName)
-			setupChannel(process, ipcChannel)
-		}
 		// Creating wrappers on process object, that will create IPC when they're called.
 		var on = Symbol()
+		var once = Symbol()
+		var send = Symbol()
 		process[on] = process.on
+		process[once] = process.once
+		process[send] = process.send
+		// Creates IPC channel and attaches .send(), .disconnect() method to process (via setupChannel).
+		function setupIpc() {
+			let ipcChannel = createNamedPipe(ipcPipeName)
+			// Reset original process methods.
+			process.on = process[on]
+			process.once = process[once]
+			process.send = process[send]
+			setupChannel(process, ipcChannel)
+		}
 		process.on = (name, ...args) => {
-			if (name === 'message') {
-				// Reset original on() method.
-				process.on = process[on]
-				// Creates IPC channel and attaches .send(), .disconnect() method to process (via setupChannel).
-				setupIpc()
-			}
-			// Make sure the listener is added.
+			if (name === 'message') setupIpc()
 			process[on](name, ...args)
 		}
+		process.once = (name, ...args) => {
+			if (name === 'message') setupIpc()
+			process[once](name, ...args)
+		}
 		process.send = message => {
-			// Reset original on() method.
-			process.on = process[on]
-			// Creates IPC channel and attaches .send(), .disconnect() method to process (via setupChannel).
 			setupIpc()
 			process.send(message)
 		}
@@ -70,7 +74,6 @@ if (isNode) {
 		stdioPipeNames.forEach((pipeName, fd) => {
 			if (fd <= 2) return
 			stdio.push(pipeName && createNamedPipe(pipeName))
-
 		})
 	}
 

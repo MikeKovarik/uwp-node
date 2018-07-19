@@ -1,6 +1,6 @@
 var {assert} = require('chai')
 // hacky, but works, these are either node's child_process or uwp-node mocks.
-var {spawn, exec} = global
+var {spawn, exec, isMock} = global
 var {NODE, promiseEvent, promiseTimeout} = require('./test-util.js')
 
 
@@ -18,6 +18,39 @@ var scriptIpcListener = './fixtures/child-ipc-listener.js'
 var scriptIpcSender   = './fixtures/child-ipc-sender.js'
 var scriptIpcComplex  = './fixtures/child-ipc-complex.js'
 
+
+/*
+TODO:
+const subprocess = child_process.spawn('ls', {
+  stdio: [
+    0, // Use parent's stdin for child
+    'pipe', // Pipe child's stdout to parent
+    fs.openSync('err.out', 'w') // Direct child's stderr to a file
+  ]
+});
+
+assert.strictEqual(subprocess.stdio[0], null);
+assert.strictEqual(subprocess.stdio[0], subprocess.stdin);
+
+assert(subprocess.stdout);
+assert.strictEqual(subprocess.stdio[1], subprocess.stdout);
+
+assert.strictEqual(subprocess.stdio[2], null);
+assert.strictEqual(subprocess.stdio[2], subprocess.stderr);
+*/
+
+/*
+TODO:
+// Child will use parent's stdios
+spawn('prg', [], { stdio: 'inherit' });
+
+// Spawn child sharing only stderr
+spawn('prg', [], { stdio: ['pipe', 'pipe', process.stderr] });
+
+// Open an extra fd=4, to interact with programs presenting a
+// startd-style interface.
+spawn('prg', [], { stdio: ['pipe', null, null, null, 'pipe'] });
+*/
 
 
 describe('spawn args sanitization and encoding', function() {
@@ -270,6 +303,53 @@ describe('basic stdio', function() {
 		assert.isNotNull(child.exitCode, 'exitCode should not be null anymore')
 	})
 
+
+	describe('inherit', function() {
+
+		// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
+		it(`child.stdout and child.stderr are null`, async () => {
+			var stdio = 'inherit'
+			var child = spawn(NODE, [scriptSimple], {stdio})
+			assert.isNull(child.stdout)
+			assert.isNull(child.stderr)
+			await child.kill()
+		})
+
+		if (isMock) {
+
+			// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
+			it(`'inherit' pipes all children stdio into parent`, async () => {
+				var logs = []
+				var errors = []
+				var stdout_write = process.stdout.write
+				process.stdout.write = (chunks, encoding, fd) => {
+					logs.push(chunks.toString().trim())
+					return stdout_write.call(process.stdout, chunks, encoding, fd)
+				}
+				var stderr_write = process.stderr.write
+				process.stderr.write = (chunks, encoding, fd) => {
+					errors.push(chunks.toString().trim())
+					return stderr_write.call(process.stderr, chunks, encoding, fd)
+				}
+				var child
+				try {
+					var stdio = 'inherit'
+					child = spawn(NODE, [scriptSimple], {stdio})
+					await promiseEvent(child, 'exit')
+				} catch(err) {}
+				process.stdout.write = stdout_write
+				process.stderr.write = stderr_write
+				assert.isNotEmpty(logs)
+				assert.isNotEmpty(errors)
+				assert.include(logs, 'console.log > stdout')
+				assert.include(errors, 'console.error > stderr')
+				await child.kill()
+			})
+
+		}
+
+	})
+
 })
 
 
@@ -292,7 +372,9 @@ describe('public IPC', () => {
 				var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
 				var child = spawn(NODE, [scriptIpcListener], {stdio})
 				child.send(message)
-				var output = JSON.parse(await promiseEvent(child.stdout, 'data'))
+				var stdout = await promiseEvent(child.stdout, 'data')
+				console.log('stdout', stdout.toString())
+				var output = JSON.parse(stdout)
 				assert.deepEqual(output, message)
 			})
 		}

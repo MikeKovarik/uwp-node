@@ -343,7 +343,6 @@ export class ChildProcess extends EventEmitter {
 			} else if (type === 'ipc') {
 				// IPC channel is integrated into the process object. The stream is not directly available.
 				this.stdio[fd] = null
-				let fd = stdio.indexOf('ipc')
 				// Create Duplex stream on which messages will be received,
 				var ipc = this._stdioAll[fd]
 				// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,

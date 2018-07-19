@@ -127,7 +127,7 @@ if (isUwp || isUwpMock) {
 				throw new Error(`Cannot connect to uwp-node-broker`)
 			}
 			return this._internalSend({
-				ipc: JSON.stringify(message) + '\n'
+				iipc: JSON.stringify(message) + '\n'
 			})
 		}
 
@@ -157,7 +157,7 @@ if (isUwp || isUwpMock) {
 
 		async kill() {
 			// TODO: figure out internal IPC and make the message do something on the broker's side.
-			await this.send('kill')
+			//await this.send('kill')
 			// NOTE: this closes the broker process but does not care if any child is running under the broker.
 			this._completeDeferral()
 			this._onCanceled()
