@@ -157,11 +157,11 @@ export class ChildProcess extends EventEmitter {
 			if (res.error) pipe.emit('error', new Error(res.error))
 		} else {
 			// Emit bigass error on the process object. Something gone very wrong.
-			if (res.error) this._handleError(res.error, res.stack)
+			if (res.error) this._emitError(res.error, res.stack)
 		}
 	}
 
-	_handleError(message, stack) {
+	_emitError(message, stack) {
 		if (message instanceof Error) {
 			var err = message
 		} else {
@@ -177,14 +177,21 @@ export class ChildProcess extends EventEmitter {
 		// TODO: properly test if this actually kills the process in broker and release all resources
 		//       (if its removed from the list of running processes).
 		//       This may need internal uwp-node IPC system to work before it can be done.
-		await broker._internalSend({
-			cid: this.cid,
-			kill: true,
-		})
-		this.killed = true
-		// Make sure the instance gets destroyed in case connection to uwp-node is severed
-		// before exit code could reach UWP and cause _destroy to be called.
-		setTimeout(() => this._destroy(), 2000)
+		try {
+			await broker._internalSend({
+				cid: this.cid,
+				kill: signal,
+			})
+			this.killed = true
+			// Make sure the instance gets destroyed in case connection to uwp-node is severed
+			// before exit code could reach UWP and cause _destroy to be called.
+			setTimeout(() => this._destroy(), 2000)
+			return true
+		} catch(err) {
+			err = errnoException(null, 'kill', err)
+			this._emitError(err)
+			return false
+		}
 	}
 
 	_destroy() {
@@ -200,9 +207,13 @@ export class ChildProcess extends EventEmitter {
 		// Destroy can be called after 'close' or 'error' event. In case of close we could destroy the stdio
 		// immediately because each of the streams are already closed. That's not the case for 'error' event.
 		// We need to wait out a while to make sure all the streams are flushed.
-		setTimeout(() => this._destroyStdio(), 100)
-		this.removeAllListeners()
+		// WARNING: If EventEmitter has no 'error' handlers, it throws the errors.
+		// Removing all listeners immediately would result in a lot of uncaught exceptions.
 		this._destroyed = true
+		setTimeout(() => {
+			this._destroyStdio()
+			this.removeAllListeners()
+		}, 100)
 	}
 
 	_onExit(exitCode, signalCode) {
@@ -215,7 +226,7 @@ export class ChildProcess extends EventEmitter {
 			if (exitCode < 0) {
 				var syscall = this.spawnfile ? 'spawn ' + this.spawnfile : 'spawn'
 				var err = errnoException(exitCode, syscall)
-				this._handleError(err)
+				this._emitError(err)
 			} else {
 				this.emit('exit', this.exitCode, this.signalCode)
 			}

@@ -100,35 +100,24 @@ if (isUwp || isUwpMock) {
 				this.taskInstance.removeEventListener('canceled', this._onCanceled)
 				this.taskInstance = undefined
 			}
-			this._completeDeferral()
-			if (this.connection) {
-				this.connection.removeEventListener('requestreceived', this._onRequestReceived)
-				this.connection = undefined
-			}
-			this.connected = false
-			super.emit('close')
-		}
-
 		// Completing deferral closes the background task if it is still running.
-		_completeDeferral() {
 			if (this.deferral) {
 				this.deferral.complete()
 				this.deferral = undefined
 			}
+			if (this.connection) {
+				this.connection.removeEventListener('requestreceived', this._onRequestReceived)
+				//this.connection = undefined
 		}
-
-		_emitError(err) {
-			super.emit('error', err)
+			/*
+			this.connected = false
+			super.emit('close')
+			*/
 		}
 
 		async send(message) {
-			if (!this.connected) {
-					// todo, this should be handled by setupChannel()
-				throw new Error(`Cannot connect to uwp-node-broker`)
-			}
-			return this._internalSend({
-				iipc: JSON.stringify(message) + '\n'
-			})
+			var iipc = JSON.stringify(message) + '\n'
+			await this._internalSend({iipc})
 		}
 
 		// Method used for internal communication between UWP and UWP Background Service (broker process)
@@ -143,7 +132,7 @@ if (isUwp || isUwpMock) {
 			try {
 				await this.connection.sendMessageAsync(req)
 			} catch(err) {
-				this._emitError(err)
+				this.emit('error', err)
 			}
 		}
 
@@ -151,15 +140,14 @@ if (isUwp || isUwpMock) {
 			try {
 				await FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
 			} catch(err) {
-				this._emitError(err)
+				this.emit('error', err)
 			}
 		}
 
 		async kill() {
 			// TODO: figure out internal IPC and make the message do something on the broker's side.
-			//await this.send('kill')
+			await this.send('kill')
 			// NOTE: this closes the broker process but does not care if any child is running under the broker.
-			this._completeDeferral()
 			this._onCanceled()
 		}
 
