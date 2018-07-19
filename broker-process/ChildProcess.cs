@@ -32,19 +32,11 @@ namespace UwpNodeBroker {
 				Cid = Convert.ToInt32(req["cid"]);
 				// The process could be spawned in long-running mode and non-blockingly listened to - cp.spawn().
 				// Or launched and blockingly waited out for exit - cp.exec().
-				var isLongRunning = req["startProcess"] as string == "spawn";
 				SetupInfo();
 				SetupStdio();
-				if (isLongRunning)
-					SetupStdioPipes();
+				SetupStdioPipes();
 				// Start the process.
-				if (isLongRunning) {
-					// Long running with asynchronous evented STDIO.
-					Spawn();
-				} else {
-					// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-					Task.Run(Exec);
-				}
+				Spawn();
 			} catch (Exception err) {
 				HandleError(err);
 			}
@@ -203,35 +195,6 @@ namespace UwpNodeBroker {
 			}
 		}
 
-		// One time execution, blocking until process closes, reads STDOUT and STDERR at once.
-		public async Task Exec() {
-			try {
-				// Start the process (blocking until it exits) and read all data from STDOUT and STDERR.
-				Proc.Start();
-				var res = new ValueSet();
-				if (Info.RedirectStandardOutput) {
-					var data = Proc.StandardOutput.ReadToEnd();
-					if (data?.Length > 0)
-						await ReportData(data, 1);
-					await ReportData(null, 1);
-				}
-				if (Info.RedirectStandardError) {
-					var data = Proc.StandardError.ReadToEnd();
-					if (data?.Length > 0)
-						await ReportData(data, 2);
-					await ReportData(null, 2);
-				}
-				// Synchronously block the task until the process exits.
-				Proc.WaitForExit();
-				// Report back information about the process.
-				await Report("exitCode", Proc.ExitCode);
-				// Close the process, release all resources and emit processClosed event.
-				Dispose();
-			} catch (Exception err) {
-				HandleError(err);
-			}
-		}
-
 		private async void HandleError(Exception err) {
 			switch (err.Message) {
 				case "The system cannot find the file specified":
@@ -306,6 +269,7 @@ namespace UwpNodeBroker {
 		///////////////////////////////////////////////////////////////////////
 
 		public void Kill() {
+			//Console.WriteLine("Kill");
 			Killed = true;
 			if (!Proc.HasExited)
 				Proc.Kill();

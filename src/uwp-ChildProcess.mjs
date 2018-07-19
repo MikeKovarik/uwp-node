@@ -94,9 +94,7 @@ export class ChildProcess extends EventEmitter {
 		//	throw new ERR_INVALID_ARG_TYPE('options.args', 'Array', options.args)
 
 		options.cwd = options.cwd || process.cwd()
-		// 'spawn' - long running with asynchronous evented STDIO.
-		// 'exec'  - one time execution, blocking until process closes, reads STDOUT and STDERR at once.
-		options.startProcess = options.startProcess || 'spawn'
+		options.cmd = 'startProcess'
 		// Custom ID necessary for identification of messages or errors. Using PIDs is not possible due to timing.
 		options.cid = this.cid
 
@@ -180,7 +178,8 @@ export class ChildProcess extends EventEmitter {
 		try {
 			await broker._internalSend({
 				cid: this.cid,
-				kill: signal,
+				cmd: 'kill', 
+				signal,
 			})
 			this.killed = true
 			// Make sure the instance gets destroyed in case connection to uwp-node is severed

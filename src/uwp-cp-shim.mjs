@@ -95,7 +95,6 @@ if (isUwp || isUwpMock) {
 
 	spawn = function(...spawnArgs) {
 		var {file, args, options} = normalizeSpawnArguments(...spawnArgs)
-		options.startProcess = 'spawn'
 		if (file === 'node' || file === 'node.exe')
 			file = process.execPath
 		options.file = file
@@ -120,7 +119,6 @@ if (isUwp || isUwpMock) {
 
 	exec = function(...execArgs) {
 		var {command, options, callback} = normalizeExecArgs(...execArgs)
-		options.startProcess = 'exec'
 		options.shell = options.shell || 'cmd.exe'
 		options.file = options.shell
 		options.args = '/C ' + command

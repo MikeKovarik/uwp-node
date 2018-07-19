@@ -29,7 +29,10 @@ namespace UwpNodeBroker {
 		// or error message thrown while spawning the process.
 		static void OnMessage(ValueSet req) {
 			// Only command without PID is starting a file.
-			if (req.ContainsKey("startProcess")) {
+			string cmd = null;
+			if (req.ContainsKey("cmd"))
+				cmd = req["cmd"] as string;
+			if (cmd == "startProcess") {
 				var child = StartProcess(req);
 			} else if (req.ContainsKey("cid")) {
 				// From now on we deal with exact process.
@@ -40,7 +43,7 @@ namespace UwpNodeBroker {
 				if (req.ContainsKey("fd") && req.ContainsKey("data")) {
 					var fd = Convert.ToInt32(req["fd"]);
 					child.Write(req["data"] as byte[], fd);
-				} else if (req.ContainsKey("kill")) {
+				} else if (cmd == "kill") {
 					child.Kill();
 				}
 			}
