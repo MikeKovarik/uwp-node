@@ -10,8 +10,8 @@ namespace UwpNodeBroker {
 
 	class NamedPipe {
 
-		List<NamedPipeServerStream> Pipes = new List<NamedPipeServerStream>();
-		List<NamedPipeServerStream> Connections = new List<NamedPipeServerStream>();
+		List<NamedPipeServerStream> Servers = new List<NamedPipeServerStream>();
+		List<NamedPipeServerStream> Clients = new List<NamedPipeServerStream>();
 
 		private TaskCompletionSource<bool> Ready = new TaskCompletionSource<bool>();
 
@@ -21,7 +21,7 @@ namespace UwpNodeBroker {
 		public event Action<string> Error;
 
 		public bool Connected {
-			get { return Connections.Count > 0; }
+			get { return Clients.Count > 0; }
 		}
 
 		public bool Disposed = false;
@@ -33,7 +33,10 @@ namespace UwpNodeBroker {
 		PipeTransmissionMode mode = PipeTransmissionMode.Byte;
 		PipeOptions options = PipeOptions.Asynchronous;
 
+		private TaskQueue queue = new TaskQueue();
+
 		public NamedPipe(string name, int maxInstances = 1) {
+			queue.Enqueue(Ready.Task);
 			this.name = name;
 			this.maxInstances = maxInstances;
 			CreateNewPipe();
@@ -43,7 +46,7 @@ namespace UwpNodeBroker {
 			NamedPipeServerStream pipe = null;
 			try {
 				pipe = new NamedPipeServerStream(name, direction, maxInstances, mode, options, chunksize, chunksize);
-				Pipes.Add(pipe);
+				Servers.Add(pipe);
 				StartListening(pipe);
 			} catch (Exception err) {
 				Ready.SetResult(false);
@@ -55,12 +58,12 @@ namespace UwpNodeBroker {
 			try {
 				pipe.WaitForConnection();
 				// Client connected to this server.
-				Connections.Add(pipe);
+				Clients.Add(pipe);
 				// Fire connection event.
 				Connection?.Invoke();
 				Ready.SetResult(true);
 				// Start another parallel stream server if needed.
-				if (maxInstances > Pipes.Count)
+				if (maxInstances > Servers.Count)
 					CreateNewPipe();
 				StartReading(pipe);
 			} catch {
@@ -97,24 +100,24 @@ namespace UwpNodeBroker {
 
 		private void OnDisconnect(NamedPipeServerStream pipe) {
 			DisposePipe(pipe);
-			if (Connections.Count == 0)
+			if (Clients.Count == 0)
 				Dispose();
 		}
 
 		private void OnError(NamedPipeServerStream pipe, Exception err) {
 			DisposePipe(pipe);
 			Error?.Invoke(err.ToString());
-			if (Connections.Count == 0)
+			if (Clients.Count == 0)
 				Dispose();
 		}
 
 		public void DisposePipe(NamedPipeServerStream pipe) {
 			if (pipe == null)
 				return;
-			if (Pipes.Contains(pipe))
-				Pipes.Remove(pipe);
-			if (Connections.Contains(pipe))
-				Connections.Remove(pipe);
+			if (Servers.Contains(pipe))
+				Servers.Remove(pipe);
+			if (Clients.Contains(pipe))
+				Clients.Remove(pipe);
 			try {
 				pipe.Disconnect();
 			} catch { }
@@ -122,8 +125,10 @@ namespace UwpNodeBroker {
 		}
 
 		public void Dispose() {
-			while (Pipes.Count > 0)
-				DisposePipe(Pipes[0]);
+			while (Servers.Count > 0)
+				DisposePipe(Servers[0]);
+			while (Clients.Count > 0)
+				DisposePipe(Clients[0]);
 			End?.Invoke();
 			// Remove references to event handlers.
 			Data = null;
@@ -133,22 +138,68 @@ namespace UwpNodeBroker {
 			Disposed = true;
 		}
 
-		public async Task Write(string message) {
+		public async Task Write(string message, NamedPipeServerStream exclude = null) {
 			byte[] buffer = Encoding.UTF8.GetBytes(message);
-			await Write(buffer);
+			await Write(buffer, exclude);
 		}
 
 		public async Task Write(byte[] buffer, NamedPipeServerStream exclude = null) {
 			if (Disposed) return;
-			if (!Connected) await Ready.Task;
-			var tasks = Connections
+			// NOTE: wrapping in async/await because all Task methods are hot (running)
+			// whereas new Task(...) unlike Task.Run(...) returns cold Task that has to be started
+			// with task.Start() method.
+			await queue.Enqueue(new Task(async () => await WriteToAllPipes(buffer, exclude)));
+		}
+
+		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
+			if (Disposed) return;
+			await pipe.WriteAsync(buffer, 0, buffer.Length);
+			await pipe.FlushAsync();
+		}
+
+		private async Task WriteToAllPipes(byte[] buffer, NamedPipeServerStream exclude = null) {
+			if (Disposed) return;
+			var tasks = Clients
 				.Where(pipe => pipe.CanWrite && pipe != exclude)
-				.Select(pipe => Task.Run(async () => {
-					await pipe.WriteAsync(buffer, 0, buffer.Length);
-					await pipe.FlushAsync();
-				}))
+				.Select(pipe => WriteToPipe(buffer, pipe))
 				.ToList();
 			await Task.WhenAll(tasks);
+		}
+
+	}
+
+
+	// FIFO Task queue for cold (not yet started) Tasks.
+	// Each task will be started when necessary.
+	class TaskQueue {
+
+		private List<Task> Queue = new List<Task>();
+		private bool Running = false;
+
+		public Task Enqueue(Task task) {
+			Queue.Add(task);
+			Next();
+			return task;
+		}
+
+		private void Next() {
+			if (!Running && Queue.Count > 0)
+				RunTask(Queue[0]);
+		}
+
+		private async void RunTask(Task task) {
+			Running = true;
+			if (task.Status == TaskStatus.Created) {
+				// WARNING: Start sometimes throws "Start may not be called on a task that was already started"
+				// despite still having Created (= not yet started) status.
+				try {
+					task.Start();
+				} catch {}
+			}
+			await task;
+			Running = false;
+			Queue.Remove(task);
+			Next();
 		}
 
 	}
