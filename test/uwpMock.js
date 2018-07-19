@@ -137,12 +137,8 @@ Windows.Foundation.Collections.ValueSet = ValueSet
 
 Windows.ApplicationModel = {}
 Windows.ApplicationModel.FullTrustProcessLauncher = {}
-Windows.ApplicationModel.FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync = () => {}
-
-
-var args
-module.exports = async function() {
-	args = args || new BackgroundActivatedEventArgs
+Windows.ApplicationModel.FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync = async () => {
+	var args = new BackgroundActivatedEventArgs
 	await args.taskInstance.triggerDetails.appServiceConnection._ready
 	Windows.UI.WebUI.WebUIApplication.emit('backgroundactivated', args)
 }

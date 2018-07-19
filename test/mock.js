@@ -1,6 +1,6 @@
 var cp = require('child_process')
 var {compileIfNeeded} = require('./testerCompiler.js')
-var mockUwp = require('./uwpMock.js')
+require('./uwpMock.js')
 var {spawn, exec, broker} = require('../index.js')
 
 global.spawn = spawn
@@ -16,19 +16,18 @@ process.on('uncaughtException', err => {
 	process.exit(1)
 })
 
-before(done => {
-	compileIfNeeded()
-		.then(() => mockUwp())
-		.then(() => done())
-})
-
-after(() => {
-	broker.kill()
-	broker.connection && broker.connection.proc && broker.connection.proc.kill()
-	//setTimeout(() => process.exit(1), 500)
-})
-
 describe('uwp-node UWP mocked in console', function() {
+
+	before(async () => {
+		await compileIfNeeded()
+		await Windows.ApplicationModel.FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
+	})
+
+	after(() => {
+		// TODO: delete this line once internal IPC (IIPC) works and kill() can work on its own.
+		broker.connection && broker.connection.proc && broker.connection.proc.kill()
+		broker.kill()
+	})
 
 	require('./tests.js')
 
