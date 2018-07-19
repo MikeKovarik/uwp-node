@@ -65,6 +65,10 @@ class AppServiceConnection extends EventTarget {
 	}
 
 	_handleMessage(message) {
+		for (var [key, value] of Object.entries(message)) {
+			if (Array.isArray(value))
+				message[key] = Buffer.from(value)
+		}
 		if ('mockReqId' in message) {
 			this.emit('_response', message)
 		} else {

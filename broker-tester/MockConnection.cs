@@ -58,6 +58,7 @@ namespace UwpNodeBroker {
 		public async Task SendMessageAsync(ValueSet valueset) {
 			//DebugValueSet(valueset);
 			var json = Converters.ValueSetToJson(valueset);
+			//Console.WriteLine($"> SEND {json}");
 			await pipe.Write(json + "\n");
 			//Console.WriteLine($"> SENT {json}");
 		}

@@ -173,7 +173,7 @@ export class ChildProcess extends EventEmitter {
 	}
 
 	// NOTE: killing the process with .kill() results in exitCode=null. It should not throw.
-	async kill(signal) {
+	async kill(signal = null) {
 		// TODO: properly test if this actually kills the process in broker and release all resources
 		//       (if its removed from the list of running processes).
 		//       This may need internal uwp-node IPC system to work before it can be done.

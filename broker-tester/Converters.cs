@@ -59,7 +59,7 @@ namespace UwpNodeBroker {
 						JArray ja = new JArray();
 						foreach (byte b in item.Value as byte[])
 							ja.Add(b);
-						Console.WriteLine("TODO convert buffer to array");
+						//Console.WriteLine("TODO convert buffer to array");
 						jo.Add(item.Key, JToken.FromObject(ja));
 					} else {
 						jo.Add(item.Key, JToken.FromObject(item.Value));

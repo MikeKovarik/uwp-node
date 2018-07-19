@@ -63,7 +63,7 @@ export function setupChannel(target, channel) {
 
 	channel.once('end', () => channel.connected = false)
 
-	handleStreamJson(channel, object => target.emit('message', object))
+	handleStreamJson(channel, message => target.emit('message', message))
 }
 
 

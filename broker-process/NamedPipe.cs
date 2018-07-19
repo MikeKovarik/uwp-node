@@ -177,7 +177,8 @@ namespace UwpNodeBroker {
 		private bool Running = false;
 
 		public Task Enqueue(Task task) {
-			Queue.Add(task);
+			if (task != null)
+				Queue.Add(task);
 			Next();
 			return task;
 		}

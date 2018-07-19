@@ -43,11 +43,14 @@ if (isNode) {
 		process[send] = process.send
 		// Creates IPC channel and attaches .send(), .disconnect() method to process (via setupChannel).
 		function setupIpc() {
-			let ipcChannel = createNamedPipe(ipcPipeName)
 			// Reset original process methods.
 			process.on = process[on]
 			process.once = process[once]
 			process.send = process[send]
+			let ipcChannel = createNamedPipe(ipcPipeName)
+			// Streams can store the messages and wait till connection, no need
+			// for us to maintain any message queue.
+			ipcChannel.connected = true
 			setupChannel(process, ipcChannel)
 		}
 		process.on = (name, ...args) => {
