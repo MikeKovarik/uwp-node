@@ -21,6 +21,7 @@ if (Writable.prototype.destroy === undefined)
 
 //var streams = [process.stdin, process.stdout, process.stderr]
 
+// TODO: do we need to keep track of whole instances? rework to only list of CIDs.
 var processes = []
 function generateCid() {
 	return Math.round(Math.random() * 100000)
@@ -123,7 +124,7 @@ export class ChildProcess extends EventEmitter {
 		//console.log('----------------------------------------------------------------')
 		//console.log('_attachToBroker()', this.cid)
 		//console.log('----------------------------------------------------------------')
-		for (var pipe of this._pipes) {
+		for (var pipe of this._stdioAll) {
 			if (!(pipe instanceof Writable)) continue
 			pipe._write = (chunk, encoding, cb) => {
 				var req = {
@@ -145,7 +146,7 @@ export class ChildProcess extends EventEmitter {
 		if (res.exitCode !== undefined) this._onExit(res.exitCode)
 		if (res.fd !== undefined) {
 			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).
-			var pipe = this._pipes[res.fd]
+			var pipe = this._stdioAll[res.fd]
 			if (!pipe || !pipe.readable || pipe._readableState.ended) return
 			// Underlying C# stream cand send null as the end of the stream. Pushing null to JS stream closes it.
 			// Most of the incoming data comes in as Uint8Array buffer (cast from C# byte[]).
@@ -166,13 +167,8 @@ export class ChildProcess extends EventEmitter {
 		} else {
 			var err = errnoException(null, 'spawn', message)
 			err.stack = stack
-			/*
-			var err = new Error(message)
-			err.message = message
-			err.code = err.errno = 'UNKNOWN'
-			err.syscall = 'spawn'
-			*/
 		}
+		// poor man's nextTick
 		setTimeout(() => this.emit('error', err))
 	}
 
@@ -236,7 +232,7 @@ export class ChildProcess extends EventEmitter {
 	// When pipes are not in flowing mode (no 'data' listener is attached), we would not be able
 	// to close off the pipes. It's necessary for _maybeClose() and eventually firing 'close' event on the process itself.
 	_flushStdio() {
-		this._pipes
+		this._stdioAll
 			.filter(stream => stream.readable && !stream._readableState.readableListening)
 			.forEach(stream => stream.resume())
 	}
@@ -244,14 +240,14 @@ export class ChildProcess extends EventEmitter {
 	// Makes sure all stdio streams that remain un-ended will be ended by pushing null,
 	// which will then trigger 'end' event in the stream.
 	_forceCloseStdio() {
-		this._pipes
+		this._stdioAll
 			.filter(stream => stream.readable && !stream._readableState.ended)
 			.forEach(stream => stream.push(null))
 	}
 
 	// Burtal absolute devastation!
 	_destroyStdio() {
-		this._pipes
+		this._stdioAll
 			.filter(stream => stream !== null)
 			.forEach(stream => {
 				stream.destroy()
@@ -300,11 +296,14 @@ export class ChildProcess extends EventEmitter {
 		return stdio
 	}
 
+	// stdio argument - array of type names ('ignore', 'pipe', 'inherit'), FDs, or null
+	// this.stdio - array of streams or nulls accessible to the user. Excludes some streams even though they exist. e.g. IPC stream, usually fd 3
+	// this._stdioAll - array of all streams (or nulls, only in case of 'ignore' or explicit null) used by the process and broker.
 	_setupStdio(stdio) {
 		// Create streams for communication with the child process.
 		// These are the one representing child's stdin, stdout, stderr and other custom pipes
 		// that pierce the boundary of main processes and serve as sink/source for child.
-		this._pipes = stdio.map((type, fd) => {
+		this._stdioAll = stdio.map((type, fd) => {
 			if (type === 'ignore')
 				return null
 			if (fd === STDIN)
@@ -313,8 +312,10 @@ export class ChildProcess extends EventEmitter {
 				var stream = new Readable
 			else
 				var stream = new Duplex
-			if (type === 'ipc')
+			if (type === 'ipc') {
 				stream.ipc = true
+				stream.connected = true
+			}
 			// Reading can't be forced
 			stream._read = () => {}
 			// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.
@@ -327,43 +328,56 @@ export class ChildProcess extends EventEmitter {
 			return stream
 		})
 
-		this.stdin  = this._pipes[0] || null
-		this.stdout = this._pipes[1] || null
-		this.stderr = this._pipes[2] || null
+		// this._stdioAll represents all process' stream instances, including those usually hidden by IPC, ignore or FD.
+		// this.stdio is list of streams accessible by user, some of which might be null (managed by Node)
+		// for example IPC stream (usually fd 3) is null and inaccessible, because it's build into the child process object.
+		// If FDs or 'ignore' instead of 'pipe' these pipes are also null in this.stdio.
+		this.stdio = this._stdioAll.slice(0)
 
-		// Copy internal streams array into Node's proc.stdio and replace 'ipc' with null if needed.
-		this.stdio = this._pipes.slice(0)
-		if (stdio.includes('ipc')) {
-			//this._closesNeeded++
-			let ipcFd = stdio.indexOf('ipc')
-			// Create Duplex stream on which messages will be received,
-			var ipc = this.channel = this.stdio[ipcFd]
-			// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
-			// handle and parse incomming data and re-emit it as 'message' events.
-			setupChannel(this, this.channel)
-			// IPC channel is integrated into the process object. The stream is not directly available.
-			this.stdio[ipcFd] = null
-		}
-
-		// Array of user defined streams that are piped to/from child process' stdio streams.
-		// i.e. numbers, 'inherit', custom streams
-		var targets = stdio.map(item => {
-			if (typeof item === 'number')
-				return stream[item]
-			if (item instanceof Readable || item instanceof Writable)
-				return item
+		stdio.forEach((type, fd) => {
+			if (type === 'ignore' || typeof type === 'number') {
+				// 'ignore'/null don't exist to begin with, numeric FDs signify routing which makes it unaccessible.
+				this.stdio[fd] = null
+			} else if (type === 'ipc') {
+				// IPC channel is integrated into the process object. The stream is not directly available.
+				this.stdio[fd] = null
+				let fd = stdio.indexOf('ipc')
+				// Create Duplex stream on which messages will be received,
+				var ipc = this._stdioAll[fd]
+				// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
+				// handle and parse incomming data and re-emit it as 'message' events.
+				// NOTE: setupChannel() assigns this.channel=ipc
+				setupChannel(this, ipc)
+			}
 		})
 
+		this.stdin  = this.stdio[0] || null
+		this.stdout = this.stdio[1] || null
+		this.stderr = this.stdio[2] || null
+
 		// Wire stdio and inherit-targets together by piping data between them.
-		for (var i = 0; i < stdio.length; i++) {
-			let stdioStream = stdio[i]
-			let targetStream = targets[i]
-			if (!stdioStream || !targetStream) continue
-			if (stdioStream instanceof Readable && targetStream instanceof Writable)
-				stdioStream.pipe(targetStream)
-			if (targetStream instanceof Readable && stdioStream instanceof Writable)
-				targetStream.pipe(stdioStream)
-		}
+		stdio
+			// Array of user defined streams that are piped to/from child process' stdio streams.
+			// i.e. FD numbers, custom streams
+			.map(streamOrFd => {
+				// User can specify FD numbers 0-2 signifying main process' stdin, stdout and stderr.
+				// Node also handles more FDs beyond 2, but we don't have access to real FDs. So only 1-2 are supported.
+				if (streamOrFd === STDIN)  return process.stdin
+				if (streamOrFd === STDOUT) return process.stdout
+				if (streamOrFd === STDERR) return process.stderr
+				if (streamOrFd instanceof Readable || streamOrFd instanceof Writable)
+					return streamOrFd
+			})
+			// Take the targets and pipe matching child's stdio into the targets.
+			.map((target, fd) => {
+				let source = this._stdioAll[fd]
+				if (source === null || source === undefined || target === null || target === undefined)
+					return
+				if (source instanceof Readable && target instanceof Writable)
+					source.pipe(target)
+				else if (target instanceof Readable && source instanceof Writable)
+					target.pipe(source)
+			})
 
 	}
 
