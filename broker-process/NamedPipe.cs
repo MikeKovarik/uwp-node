@@ -16,9 +16,9 @@ namespace UwpNodeBroker {
 		private TaskCompletionSource<bool> Ready = new TaskCompletionSource<bool>();
 
 		public event Action Connection;
-		public event Action<byte[]> Data;
+		public event Action<byte[], NamedPipeServerStream> Data;
+		public event Action<string, NamedPipeServerStream> Error;
 		public event Action End;
-		public event Action<string> Error;
 
 		public bool Connected {
 			get { return Clients.Count > 0; }
@@ -49,27 +49,34 @@ namespace UwpNodeBroker {
 				Servers.Add(pipe);
 				StartListening(pipe);
 			} catch (Exception err) {
-				Ready.SetResult(false);
 				OnError(pipe, err);
+				Ready.TrySetResult(false);
 			}
 		}
 
 		private void StartListening(NamedPipeServerStream pipe) => Task.Factory.StartNew(() => {
 			try {
 				pipe.WaitForConnection();
+			} catch (Exception err) {
+				// NOTE: WaitForConnection() throws if no connection is received and pipe closes.
+				OnError(pipe, err);
+				Ready.TrySetResult(false);
+				return;
+			}
+			try {
 				// Client connected to this server.
 				Clients.Add(pipe);
 				// Fire connection event.
 				Connection?.Invoke();
-				Ready.SetResult(true);
+				Ready.TrySetResult(true);
 				// Start another parallel stream server if needed.
 				if (maxInstances > Servers.Count)
 					CreateNewPipe();
 				StartReading(pipe);
-			} catch {
-				//Console.WriteLine($"Pipe {name} did not start listening");
-				Ready.SetResult(false);
-				DisposePipe(pipe);
+			} catch (Exception err) {
+				// NOTE: WaitForConnection() throws if no connection is received and pipe closes.
+				OnError(pipe, err);
+				Ready.TrySetResult(false);
 			}
 		});
 
@@ -89,7 +96,7 @@ namespace UwpNodeBroker {
 					}
 					byte[] trimmed = new byte[bytesRead];
 					Array.Copy(buffer, trimmed, bytesRead);
-					Data?.Invoke(trimmed);
+					Data?.Invoke(trimmed, pipe);
 					//MemoryStream trimmed = new MemoryStream();
 					//trimmed.Write(buffer, 0, bytesRead);
 				}
@@ -98,16 +105,20 @@ namespace UwpNodeBroker {
 			}
 		});
 
-		private void OnDisconnect(NamedPipeServerStream pipe) {
-			DisposePipe(pipe);
-			if (Clients.Count == 0)
-				Dispose();
+		private void OnError(NamedPipeServerStream pipe, Exception err) {
+			Console.WriteLine($"C#: NamedPipe ERROR {name} - {err}");
+			Error?.Invoke(err.ToString(), pipe);
+			OnDisconnect(pipe);
 		}
 
-		private void OnError(NamedPipeServerStream pipe, Exception err) {
+		private void OnDisconnect(NamedPipeServerStream pipe) {
 			DisposePipe(pipe);
-			Error?.Invoke(err.ToString());
-			if (Clients.Count == 0)
+			MaybeDisposeAll();
+		}
+
+		private void MaybeDisposeAll() {
+			if (Servers.Count == 0)
+			//if (Clients.Count == 0)
 				Dispose();
 		}
 

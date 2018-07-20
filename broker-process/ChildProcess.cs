@@ -104,8 +104,8 @@ namespace UwpNodeBroker {
 				var pipe = new NamedPipe(name);
 				pipe.fd = fd;
 				// Handle and report all output and errors of the pipe.
-				pipe.Data += async data => await ReportData(data, pipe.fd);
-				pipe.Error += async err => await ReportError(err, pipe.fd);
+				pipe.Data += async (data, p) => await ReportData(data, pipe.fd);
+				pipe.Error += async (err, p) => await ReportError(err, pipe.fd);
 				// Pushing null to stream causes it to close and emit 'end' event.
 				pipe.End += async () => await ReportData(null, pipe.fd);
 				Pipes[fd] = pipe;
@@ -115,7 +115,10 @@ namespace UwpNodeBroker {
 			// natively, we have to pass in through env vars custom list of names of pipes that we're creating in C#
 			// that JS side of of uwp-node has too bind to.
 			Info.EnvironmentVariables.Add("uwp-node-stdio-pipes", string.Join("|", pipeNames));
+			// Internal IPC used for internal uwp-node communications.
+			Info.EnvironmentVariables.Add("uwp-node-stdio-iipc", UWP.name);
 			if (Stdio.Contains("ipc")) {
+				// Classic node's 'ipc' pipe created with cp.spawn().
 				int ipcFd = Array.FindIndex(Stdio, item => item == "ipc");
 				Info.EnvironmentVariables.Add("uwp-node-stdio-ipc", ipcFd.ToString());
 			}

@@ -322,10 +322,8 @@ export class ChildProcess extends EventEmitter {
 				var stream = new Readable
 			else
 				var stream = new Duplex
-			if (type === 'ipc') {
+			if (type === 'ipc')
 				stream.ipc = true
-				stream.connected = true
-			}
 			// Reading can't be forced
 			stream._read = () => {}
 			// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.

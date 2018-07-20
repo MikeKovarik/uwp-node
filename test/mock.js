@@ -5,6 +5,7 @@ var {spawn, exec, broker} = require('../index.js')
 
 global.spawn = spawn
 global.exec = exec
+global.broker = broker
 global.isMock = true
 
 

@@ -48,9 +48,6 @@ if (isNode) {
 			process.once = process[once]
 			process.send = process[send]
 			let ipcChannel = createNamedPipe(ipcPipeName)
-			// Streams can store the messages and wait till connection, no need
-			// for us to maintain any message queue.
-			ipcChannel.connected = true
 			setupChannel(process, ipcChannel)
 		}
 		process.on = (name, ...args) => {

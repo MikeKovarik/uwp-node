@@ -1,6 +1,6 @@
 var {assert} = require('chai')
 // hacky, but works, these are either node's child_process or uwp-node mocks.
-var {spawn, exec, isMock} = global
+var {spawn, exec, isMock, broker} = global
 var {NODE, promiseEvent, promiseTimeout} = require('./test-util.js')
 
 
@@ -377,7 +377,7 @@ describe('public IPC', () => {
 				assert.deepEqual(output, message)
 			})
 		}
-/*
+
 		basicIpcMessage(null)
 		basicIpcMessage(45)
 		basicIpcMessage(true)
@@ -385,7 +385,7 @@ describe('public IPC', () => {
 		basicIpcMessage('hello world')
 		basicIpcMessage(['Zenyatta', 'Moira', 'Winston'])
 		basicIpcMessage({foo: 'bar'})
-*/
+
 		it(`Buffer`, async () => {
 			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
 			var child = spawn(NODE, [scriptIpcListener], {stdio})
@@ -412,7 +412,7 @@ describe('public IPC', () => {
 			assert.instanceOf(err, Error)
 			assert.equal(err.code, 'ERR_MISSING_ARGS')
 		})
-/*
+
 		it(`send() throws if ipc channel is closed`, async () => {
 			var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
 			var child = spawn(NODE, [scriptSimple], {stdio})
@@ -425,7 +425,7 @@ describe('public IPC', () => {
 			assert.instanceOf(err, Error)
 			assert.equal(err.code, 'ERR_IPC_CHANNEL_CLOSED')
 		})
-*/
+
 	})
 
 	describe(`child sends message via process.send(), parent receives it via child.on('message')`, () => {
@@ -480,9 +480,26 @@ describe('public IPC', () => {
 })
 
 
-describe('internal IPC', function() {
+isMock && describe('internal IPC', function() {
 	// used for internal commands between broker and child scripts like
 	// when bg script triggers broker to open UWP app.
+
+	it(`UWP -> broker -> child process`, async () => {
+		var child = spawn(NODE, ['./fixtures/child-iipc-listener.js'])
+		broker.send('foobar')
+		var stdout = (await promiseEvent(child.stdout, 'data')).toString().trim()
+		assert.equal(stdout, 'foobar')
+		await promiseEvent(child, 'exit')
+	})
+
+	it(`child process -> broker -> UWP`, async () => {
+		var child = spawn(NODE, ['./fixtures/child-iipc-sender.js'], {stdio: 'inherit'})
+		var cmd = (await promiseEvent(broker, 'message'))
+		assert.equal(cmd, 'kthxbye')
+		await child.kill()
+		await promiseEvent(child, 'exit')
+	})
+
 })
 
 

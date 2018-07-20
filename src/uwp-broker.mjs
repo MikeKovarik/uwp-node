@@ -1,5 +1,6 @@
 import {EventEmitter} from 'events'
 import {isUwp, isUwpMock} from './util.mjs'
+import {parseIipcMessage, stringifyIipcMessage} from './iipc.mjs'
 
 
 export var connection
@@ -64,24 +65,6 @@ if (isUwp || isUwpMock) {
 			}
 		}
 		
-		_onRequestReceived(e) {
-			var valueSet = e.request.message
-			if (valueSet.error && !valueSet.cid) {
-				var err = new Error('uwp-node broker: ' + valueSet.error)
-				err.stack = valueSet.stack
-				if (this._events.error && this._events.error.length) {
-					// TODO: take into account internal listeners
-					super.emit('error', err)
-				} else {
-					throw err
-				}
-			} else if (valueSet.ipc) {
-				super.emit('message', valueSet.ipc) // TODO: unwrap from JSON?
-			} else {
-				super.emit('internalMessage', valueSet)
-			}
-		}
-		
 		_onBackgroundActivated(e) {
 			//console.log('--- backgroundactivated ---')
 			this.taskInstance = e.taskInstance
@@ -100,7 +83,7 @@ if (isUwp || isUwpMock) {
 				this.taskInstance.removeEventListener('canceled', this._onCanceled)
 				this.taskInstance = undefined
 			}
-		// Completing deferral closes the background task if it is still running.
+			// Completing deferral closes the background task if it is still running.
 			if (this.deferral) {
 				this.deferral.complete()
 				this.deferral = undefined
@@ -108,16 +91,34 @@ if (isUwp || isUwpMock) {
 			if (this.connection) {
 				this.connection.removeEventListener('requestreceived', this._onRequestReceived)
 				//this.connection = undefined
-		}
-			/*
+			}
 			this.connected = false
 			super.emit('close')
-			*/
 		}
 
-		async send(message) {
-			var iipc = JSON.stringify(message) + '\n'
-			await this._internalSend({iipc})
+		_onRequestReceived(e) {
+			//console.log('_onRequestReceived()', e.request.message)
+			var valueSet = e.request.message
+			if (valueSet.error && !valueSet.cid) {
+				var err = new Error('uwp-node broker: ' + valueSet.error)
+				err.stack = valueSet.stack
+				if (this._events.error && this._events.error.length) {
+					// TODO: take into account internal listeners
+					super.emit('error', err)
+				} else {
+					throw err
+				}
+			} else if (valueSet.iipc) {
+				super.emit('message', ...parseIipcMessage(valueSet.iipc)) // TODO: unwrap from JSON?
+			} else {
+				super.emit('internalMessage', valueSet)
+			}
+		}
+
+		async send(...args) {
+			await this._internalSend({
+				iipc: stringifyIipcMessage(...args)
+			})
 		}
 
 		// Method used for internal communication between UWP and UWP Background Service (broker process)

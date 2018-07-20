@@ -1,7 +1,7 @@
 var {EventEmitter} = require('events')
 var cp = require('child_process')
 var {testerExe} = require('./testerCompiler.js')
-var {setupChannel, createNamedPipe} = require('../util.js')
+var {setupChannel, createNamedPipe, newLineFeedSplitter} = require('../util.js')
 
 
 // Helper functions
@@ -16,10 +16,10 @@ function awaitEvent(emitter, name) {
 var lineStart = 'CREATED IPC PIPE:'
 function awaitPipeName(proc) {
 	return new Promise((resolve, reject) => {
-		proc.stdout.on('data', async buffer => {
-			var str = buffer.toString().trim()
-			if (str.startsWith(lineStart)) {
-				var pipeName = str.split(':')[1].trim()
+		newLineFeedSplitter(proc.stdout, line => {
+			line = line.trim()
+			if (line.startsWith(lineStart)) {
+				var pipeName = line.split(':')[1].trim()
 				resolve(pipeName)
 			}
 		})

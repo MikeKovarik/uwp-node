@@ -11,18 +11,22 @@ export var isUwp = typeof Windows !== 'undefined' && typeof MSApp !== 'undefined
 export var isUwpMock = typeof Windows !== 'undefined' && typeof MSApp === 'undefined'
 export var isNode = typeof process !== 'undefined' && !!process.versions && !!process.versions.node
 
-export function handleStreamJson(channel, callback) {
-	var jsonBuffer = ''
+export function newLineFeedSplitter(stream, callback) {
+	var temp = ''
 	var handler = chunk => {
-		jsonBuffer += chunk.toString()
-		if (jsonBuffer.includes('\n')) {
-			let chunks = jsonBuffer.split('\n')
-			jsonBuffer = chunks.pop()
-			chunks.forEach(json => callback(JSON.parse(json))) // TODO? let consumer parse it. it'd enable parsing even non-json newline delimited messages (broker ipc)
+		temp += chunk
+		if (temp.includes('\n')) {
+			let chunks = temp.split('\n')
+			temp = chunks.pop()
+			chunks.forEach(callback)
 		}
 	}
-	channel.on('data', handler)
-	return handler
+	stream.on('data', handler)
+	return () => stream.removeListener('data', handler)
+}
+
+export function handleStreamJson(channel, callback) {
+	return newLineFeedSplitter(channel, json => callback(JSON.parse(json)))
 }
 
 
@@ -30,10 +34,12 @@ export function handleStreamJson(channel, callback) {
 // and unwraps and parses incoming data (from channel) and exposes it as 'message' event.
 export function setupChannel(target, channel) {
 
-	Object.defineProperty(target, 'connected', {
-		get: () => channel.connected,
-		set: val => channel.connected = val,
-	})
+	if (target !== channel) {
+		Object.defineProperty(target, 'connected', {
+			get: () => channel.connected,
+			set: val => channel.connected = val,
+		})
+	}
 
 	target.channel = channel
 
@@ -85,11 +91,14 @@ export function joinPath(...segments) {
 
 // NODE
 
-export function createNamedPipe(name) {
+export function createNamedPipe(name, maskFd = true) {
 	var path = `\\\\.\\pipe\\${name}`
 	var channel = new Socket
-	channel.connected = false
+	// Streams can store the messages and wait till connection, no need
+	// for us to maintain any message queue.
+	channel.connected = true
 	var onError = err => {
+		console.error('JS:', err)
 		throw new Error(`uwp-node could not connect to pipe '${path}'`)
 	}
 	var onConnect = () => {
@@ -99,11 +108,13 @@ export function createNamedPipe(name) {
 	channel.on('error', onError)
 	channel.connect(path, onConnect)
 	// Create fake fd. Doesn't really do anything.
-	var uselessFd = fs.openSync('\\\\.\\NUL', 'r')
-	channel.once('close', hadError => {
-		channel.connected = false
-		fs.closeSync(uselessFd)
-	})
+	if (maskFd) {
+		var uselessFd = fs.openSync('\\\\.\\NUL', 'r')
+		channel.once('close', hadError => {
+			channel.connected = false
+			fs.closeSync(uselessFd)
+		})
+	}
 	return channel
 }
 
