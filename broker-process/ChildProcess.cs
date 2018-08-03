@@ -95,11 +95,10 @@ namespace UwpNodeBroker {
 			// Skip the holy trinity of STDIO (IN/OUT/ERR) and start at custom pipes.
 			int fd = 3;
 			// Few variables used for creation of pipe name.
-			var newProcRandomNum = (new Random()).Next(0, 10000); // NOTE: ideally libuv/node would use win32 handle.
 			var brokerPid = Process.GetCurrentProcess().Id;
 			// Create custom pipes for the other remaining (defined by user) stdio pipes.
 			foreach (var type in Stdio.Skip(fd)) {
-				var name = $"uwp-node\\{newProcRandomNum}-{fd}-{brokerPid}";
+				var name = $"uwp-node\\{Cid}-{fd}-{brokerPid}";
 				pipeNames.Add(name);
 				var pipe = new NamedPipe(name);
 				pipe.fd = fd;

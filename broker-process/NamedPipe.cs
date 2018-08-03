@@ -165,12 +165,6 @@ namespace UwpNodeBroker {
 			await queue.Enqueue(new Task(async () => await WriteToAllPipes(buffer, exclude)));
 		}
 
-		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
-			if (Disposed) return;
-			await pipe.WriteAsync(buffer, 0, buffer.Length);
-			await pipe.FlushAsync();
-		}
-
 		private async Task WriteToAllPipes(byte[] buffer, NamedPipeServerStream exclude = null) {
 			if (Disposed) return;
 			var tasks = Clients
@@ -178,6 +172,12 @@ namespace UwpNodeBroker {
 				.Select(pipe => WriteToPipe(buffer, pipe))
 				.ToList();
 			await Task.WhenAll(tasks);
+		}
+
+		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
+			if (Disposed) return;
+			await pipe.WriteAsync(buffer, 0, buffer.Length);
+			await pipe.FlushAsync();
 		}
 
 	}

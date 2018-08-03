@@ -67,8 +67,9 @@ export function setupChannel(target, channel) {
 		console.warn('disconnect() not implemented') // TODO
 	}
 
+	channel.once('end', () => {
+		channel.connected = false
 	// TODO: to be tested
-	channel.once('close', () => {
 		target.emit('disconnect')
 	})
 
@@ -76,11 +77,11 @@ export function setupChannel(target, channel) {
 	var listeners = 0
 	var isIpcEvent = name => name === 'message' || name === 'disconnect'
 	target.on('removeListener', name => {
-		if (isIpcEvent(name) && --listeners === 0)
+		if (isIpcEvent(name) && --listeners === 0 && channel.unref)
 			channel.unref()
 	})
 	target.on('newListener', name => {
-		if (isIpcEvent(name) && listeners++ === 0)
+		if (isIpcEvent(name) && listeners++ === 0 && channel.ref)
 			channel.ref()
 	})
 
@@ -123,13 +124,11 @@ export function createNamedPipe(name, maskFd = true) {
 	channel.on('error', onError)
 	channel.connect(path, onConnect)
 	channel.unref()
+	channel.once('end', () => channel.connected = false)
 	// Create fake fd. Doesn't really do anything.
 	if (maskFd) {
 		var uselessFd = fs.openSync('\\\\.\\NUL', 'r')
-		channel.once('close', hadError => {
-			channel.connected = false
-			fs.closeSync(uselessFd)
-		})
+		channel.once('close', hadError => fs.closeSync(uselessFd))
 	}
 	return channel
 }
