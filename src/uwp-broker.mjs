@@ -109,7 +109,7 @@ if (isUwp || isUwpMock) {
 					throw err
 				}
 			} else if (valueSet.iipc) {
-				super.emit('message', ...parseIipcMessage(valueSet.iipc)) // TODO: unwrap from JSON?
+				super.emit('message', ...parseIipcMessage(valueSet.iipc))
 			} else {
 				super.emit('internalMessage', valueSet)
 			}

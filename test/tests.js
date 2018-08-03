@@ -72,6 +72,7 @@ describe('spawn args sanitization and encoding', function() {
 		})
 	}
 
+	/*
 	// basics
 	testSanitizeArgsSpawn(' ')
 	testSanitizeArgsSpawn('\'')
@@ -103,10 +104,12 @@ describe('spawn args sanitization and encoding', function() {
 	// more complex
 	testSanitizeArgsSpawn('"test\\"\\"123\\"\\"234"')
 	testSanitizeArgsSpawn('\'hello\' \'world\'')
+	*/
 	// clusterfuck
 	testSanitizeArgsSpawn('hello world', '"C:\\Program Filles/node"', 'k\nthx\nbye')
 	testSanitizeArgsSpawn("arg1", "an argument with whitespace", 'even some "quotes"')
-	// what the hell?
+	/*
+	// more madness
 	testSanitizeArgsSpawn('\\"hello\\ world')
 	testSanitizeArgsSpawn('\\hello\\12\\3\\')
 	testSanitizeArgsSpawn('hello world\\')
@@ -116,38 +119,13 @@ describe('spawn args sanitization and encoding', function() {
 	testSanitizeArgsSpawn('foo\\ bar')
 	testSanitizeArgsSpawn('foo \\bar')
 	testSanitizeArgsSpawn('foo\\nbar')
-
-
-})
-
-
-describe('stdio encoding', function() {
-
-	it(`should receive ě on stdout`, async () => {
-		var child = spawn(NODE, ['./fixtures/encoding1.js'])
-		var stdout = await promiseEvent(child.stdout, 'data')
-		assert.equal(stdout.toString().trim(), 'ě')
-	})
-	
-	it(`should receive 💀 on stdout`, async () => {
-		var child = spawn(NODE, ['./fixtures/encoding2.js'])
-		var stdout = await promiseEvent(child.stdout, 'data')
-		assert.equal(stdout.toString().trim(), '💀')
-	})
-	
-	it(`should receive 💀 on stdout (exec)`, async () => {
-		var {stdout} = await exec(`"${NODE}" ./fixtures/encoding2.js`)
-		assert.equal(stdout.toString().trim(), '💀')
-	})
-
-	it(`args support special characters`, async () => {
-		var myArgs = ['ě', 'éí|]', '💀']
-		var child = spawn(NODE, [scriptArgs, ...myArgs])
-		var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
-		assert.deepEqual(args, myArgs)
-	})
+	*/
 
 })
+
+
+
+
 
 
 describe('errors', function() {
@@ -252,6 +230,122 @@ describe('errors', function() {
 
 })
 
+
+
+
+
+describe(`basic closing and killing, 'exit' & 'close' events`, function() {
+
+	it(`killing process emits 'exit' event`, async () => {
+		var child = spawn(NODE, [scriptEndless])
+		setTimeout(() => child.kill())
+		await Promise.all([
+			promiseEvent(child, 'exit'),
+			promiseEvent(child, 'close'),
+		])
+	})
+
+	it(`killing process result in exitCode = null`, async () => {
+		var child = spawn(NODE, [scriptEndless])
+		setTimeout(() => child.kill())
+		var exitCode = await promiseEvent(child, 'exit')
+		assert.isNull(exitCode, 'exitCode emitted in exit should be null')
+		assert.isNull(child.exitCode, 'child.exitCode should be null')
+	})
+
+	it(`all stdio emits 'close' without listeners`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe']
+		var child = spawn(NODE, [scriptEndless], {stdio})
+		setTimeout(() => child.kill())
+		await Promise.all([
+			promiseEvent(child.stdout, 'close'),
+			promiseEvent(child.stderr, 'close'),
+		])
+	})
+
+	it(`all stdio emits 'close' with listeners`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe']
+		var child = spawn(NODE, [scriptEndless], {stdio})
+		child.stdout.on('data', () => {})
+		child.stderr.on('data', () => {})
+		setTimeout(() => child.kill())
+		await Promise.all([
+			promiseEvent(child.stdout, 'close'),
+			promiseEvent(child.stderr, 'close'),
+		])
+	})
+
+	it(`process does not close if it has IPC and 'message' listener`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+		var child = spawn(NODE, [scriptIpcListener], {stdio})
+		assert.isNull(child.exitCode)
+		var closed = false
+		child.once('close', () => closed = true)
+		await promiseTimeout(200)
+		assert.isFalse(closed, `should not have emitted 'close'`)
+		assert.isNull(child.exitCode, 'exitCode should be still null')
+		await child.kill()
+	})
+
+	it(`process does not close if it has IPC and 'message' listener`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+		var child = spawn(NODE, [scriptEndless], {stdio})
+		var closed = false
+		child.once('close', () => closed = true)
+		await promiseTimeout(200)
+		assert.isFalse(closed, `should not have emitted 'close'`)
+		await child.kill()
+		assert.isFalse(closed, `should not have emitted 'close'`)
+		await promiseTimeout(200)
+		assert.isTrue(closed, `should have emitted 'close' already`)
+	})
+
+})
+
+
+
+
+
+describe('self termination', function() {
+
+	it(`process exits if it doesn't have IPC (without uwp-node)`, async () => {
+		var stdio = 'pipe'
+		var child = spawn(NODE, [scriptSimple], {stdio})
+		await promiseEvent(child, 'exit')
+		await promiseEvent(child, 'close')
+	})
+
+	it(`process exits if it doesn't have IPC (with imported uwp-node)`, async () => {
+		var stdio = 'pipe'
+		var child = spawn(NODE, [scriptEnv], {stdio})
+		await promiseEvent(child, 'exit')
+		await promiseEvent(child, 'close')
+	})
+
+	it(`process exits if it has IPC but no 'message' listener`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+		var child = spawn(NODE, [scriptIpcBasic], {stdio})
+		assert.isNull(child.exitCode)
+		await promiseEvent(child, 'exit')
+		await promiseEvent(child, 'close')
+		assert.isNotNull(child.exitCode, 'exitCode should not be null anymore')
+	})
+
+	it(`process exits when IPC 'message' listener is removed`, async () => {
+		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
+		var child = spawn(NODE, ['./fixtures/child-ipc-unref.js'], {stdio})
+		assert.isNull(child.exitCode)
+		await promiseEvent(child, 'exit')
+		await promiseEvent(child, 'close')
+	})
+
+})
+
+
+
+
+
+
 describe('cleanup & pollution', function() {
 
 	it(`args are not polluted`, async () => {
@@ -274,6 +368,10 @@ describe('cleanup & pollution', function() {
 })
 
 
+
+
+
+
 describe('basic stdio', function() {
 
 	// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
@@ -287,72 +385,40 @@ describe('basic stdio', function() {
 		assert.equal(stdout, expected)
 	})
 
-	it(`process closes if it doesnt have IPC`, async () => {
-		var stdio = 'pipe'
-		var child = spawn(NODE, [scriptSimple], {stdio})
-		await promiseEvent(child, 'exit')
-		await promiseEvent(child, 'close')
-	})
+	describe('encoding', function() {
 
-	it(`process closes if it has IPC but no 'message' listener`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
-		var child = spawn(NODE, [scriptIpcBasic], {stdio})
-		assert.isNull(child.exitCode)
-		await promiseEvent(child, 'exit')
-		await promiseEvent(child, 'close')
-		assert.isNotNull(child.exitCode, 'exitCode should not be null anymore')
-	})
-
-
-	describe('inherit', function() {
-
-		// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
-		it(`child.stdout and child.stderr are null`, async () => {
-			var stdio = 'inherit'
-			var child = spawn(NODE, [scriptSimple], {stdio})
-			assert.isNull(child.stdout)
-			assert.isNull(child.stderr)
-			await child.kill()
+		it(`should receive ě on stdout`, async () => {
+			var child = spawn(NODE, ['./fixtures/encoding1.js'])
+			var stdout = await promiseEvent(child.stdout, 'data')
+			assert.equal(stdout.toString().trim(), 'ě')
+		})
+		
+		it(`should receive 💀 on stdout`, async () => {
+			var child = spawn(NODE, ['./fixtures/encoding2.js'])
+			var stdout = await promiseEvent(child.stdout, 'data')
+			assert.equal(stdout.toString().trim(), '💀')
+		})
+		
+		it(`should receive 💀 on stdout (exec)`, async () => {
+			var {stdout} = await exec(`"${NODE}" ./fixtures/encoding2.js`)
+			assert.equal(stdout.toString().trim(), '💀')
 		})
 
-// This just canno be reliably tested
-/*
-		if (isMock) {
+		it(`args support special characters`, async () => {
+			var myArgs = ['ě', 'éí|]', '💀']
+			var child = spawn(NODE, [scriptArgs, ...myArgs])
+			var args = JSON.parse(await promiseEvent(child.stdout, 'data'))
+			assert.deepEqual(args, myArgs)
+		})
 
-			// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
-			it(`'inherit' pipes all children stdio into parent`, async () => {
-				var logs = []
-				var errors = []
-				var stdout_write = process.stdout.write
-				process.stdout.write = (chunks, encoding, fd) => {
-					logs.push(chunks.toString().trim())
-					return stdout_write.call(process.stdout, chunks, encoding, fd)
-				}
-				var stderr_write = process.stderr.write
-				process.stderr.write = (chunks, encoding, fd) => {
-					errors.push(chunks.toString().trim())
-					return stderr_write.call(process.stderr, chunks, encoding, fd)
-				}
-				var child
-				try {
-					var stdio = 'inherit'
-					child = spawn(NODE, [scriptSimple], {stdio})
-					await promiseEvent(child, 'exit')
-				} catch(err) {}
-				process.stdout.write = stdout_write
-				process.stderr.write = stderr_write
-				assert.isNotEmpty(logs)
-				assert.isNotEmpty(errors)
-				assert.include(logs, 'console.log > stdout')
-				assert.include(errors, 'console.error > stderr')
-				await child.kill()
-			})
-
-		}
-*/
 	})
 
 })
+
+
+
+
+
 
 
 describe('public IPC', () => {
@@ -503,77 +569,57 @@ isMock && describe('internal IPC', function() {
 })
 
 
-describe(`basic closing and killing, 'exit' & 'close' events`, function() {
-
-	it(`killing process emits 'exit' event`, async () => {
-		var child = spawn(NODE, [scriptEndless])
-		setTimeout(() => child.kill())
-		await Promise.all([
-			promiseEvent(child, 'exit'),
-			promiseEvent(child, 'close'),
-		])
-	})
-
-	it(`killing process result in exitCode = null`, async () => {
-		var child = spawn(NODE, [scriptEndless])
-		setTimeout(() => child.kill())
-		var exitCode = await promiseEvent(child, 'exit')
-		assert.isNull(exitCode, 'exitCode emitted in exit should be null')
-		assert.isNull(child.exitCode, 'child.exitCode should be null')
-	})
-
-	it(`all stdio emits 'close' without listeners`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe']
-		var child = spawn(NODE, [scriptEndless], {stdio})
-		setTimeout(() => child.kill())
-		await Promise.all([
-			promiseEvent(child.stdout, 'close'),
-			promiseEvent(child.stderr, 'close'),
-		])
-	})
-
-	it(`all stdio emits 'close' with listeners`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe']
-		var child = spawn(NODE, [scriptEndless], {stdio})
-		child.stdout.on('data', () => {})
-		child.stderr.on('data', () => {})
-		setTimeout(() => child.kill())
-		await Promise.all([
-			promiseEvent(child.stdout, 'close'),
-			promiseEvent(child.stderr, 'close'),
-		])
-	})
-
-	it(`process does not close if it has IPC and 'message' listener`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
-		var child = spawn(NODE, [scriptIpcListener], {stdio})
-		assert.isNull(child.exitCode)
-		var closed = false
-		child.once('close', () => closed = true)
-		await promiseTimeout(200)
-		assert.isFalse(closed, `should not have emitted 'close'`)
-		assert.isNull(child.exitCode, 'exitCode should be still null')
-		await child.kill()
-	})
-
-	it(`process does not close if it has IPC and 'message' listener`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
-		var child = spawn(NODE, [scriptEndless], {stdio})
-		var closed = false
-		child.once('close', () => closed = true)
-		await promiseTimeout(200)
-		assert.isFalse(closed, `should not have emitted 'close'`)
-		await child.kill()
-		assert.isFalse(closed, `should not have emitted 'close'`)
-		await promiseTimeout(200)
-		assert.isTrue(closed, `should have emitted 'close' already`)
-	})
-
-})
-
 
 
 describe(`stdio variations`, function() {
+
+	describe('stdio: inherit', function() {
+
+		// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
+		it(`child.stdout and child.stderr are null`, async () => {
+			var stdio = 'inherit'
+			var child = spawn(NODE, [scriptSimple], {stdio})
+			assert.isNull(child.stdout)
+			assert.isNull(child.stderr)
+			await child.kill()
+		})
+
+		// This just cannot be reliably tested
+		/*
+		if (isMock) {
+
+			// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
+			it(`'inherit' pipes all children stdio into parent`, async () => {
+				var logs = []
+				var errors = []
+				var stdout_write = process.stdout.write
+				process.stdout.write = (chunks, encoding, fd) => {
+					logs.push(chunks.toString().trim())
+					return stdout_write.call(process.stdout, chunks, encoding, fd)
+				}
+				var stderr_write = process.stderr.write
+				process.stderr.write = (chunks, encoding, fd) => {
+					errors.push(chunks.toString().trim())
+					return stderr_write.call(process.stderr, chunks, encoding, fd)
+				}
+				var child
+				try {
+					var stdio = 'inherit'
+					child = spawn(NODE, [scriptSimple], {stdio})
+					await promiseEvent(child, 'exit')
+				} catch(err) {}
+				process.stdout.write = stdout_write
+				process.stderr.write = stderr_write
+				assert.isNotEmpty(logs)
+				assert.isNotEmpty(errors)
+				assert.include(logs, 'console.log > stdout')
+				assert.include(errors, 'console.error > stderr')
+				await child.kill()
+			})
+
+		}
+		*/
+	})
 
 	describe(`stdio: default`, function() {
 		var stdio = undefined
@@ -592,7 +638,7 @@ describe(`stdio variations`, function() {
 
 	// TODO: these tests throw because additional pipes are unprotected from using
 	// and they prevent closing.
-	// The tests pass, but internally the ChildProcess instance doesnt get destroyed
+	// The tests pass, but internally the ChildProcess instance doesn't get destroyed
 	// without having to call kill().
 	describe(`stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe']`, function() {
 		var stdio = ['pipe', 'pipe', 'pipe', 'pipe', 'pipe']
