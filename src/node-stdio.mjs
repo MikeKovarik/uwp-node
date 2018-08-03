@@ -30,51 +30,14 @@ if (isNode) {
 		delete env['uwp-node-stdio-ipc']
 		var ipcPipeName = stdioPipeNames[ipcFd]
 		stdioPipeNames[ipcFd] = null
-		// Attach the ipc stream to process, create process.send() method,
-		// start handling incomming data and parsing it as 'message' events.
-		// But only when and if either process.send() is called, or 'message'
-		// event listened to.
-		// Creating wrappers on process object, that will create IPC when they're called.
-		var on = Symbol()
-		var once = Symbol()
-		var send = Symbol()
-		process[on] = process.on
-		process[once] = process.once
-		process[send] = process.send
-		// Creates IPC channel and attaches .send(), .disconnect() method to process (via setupChannel).
-		function setupIpc() {
-			// Reset original process methods.
-			process.on = process[on]
-			process.once = process[once]
-			process.send = process[send]
-			let ipcChannel = createNamedPipe(ipcPipeName)
-			setupChannel(process, ipcChannel)
-		}
-		process.on = (name, ...args) => {
-			if (name === 'message') setupIpc()
-			process[on](name, ...args)
-		}
-		process.once = (name, ...args) => {
-			if (name === 'message') setupIpc()
-			process[once](name, ...args)
-		}
-		process.send = message => {
-			setupIpc()
-			process.send(message)
-		}
-		process.disconnect = () => {}
+		let ipcChannel = createNamedPipe(ipcPipeName)
+		setupChannel(process, ipcChannel)
 	}
 
 	// Now we create the addition stdio pipes.
-	// NOTE: these are not wrapped like IPC is and using these pipes will make the process run forever
-	// if user doesn't explicitly kill the process. Attaching any kind of listener or maintaining net connection
-	// prevents the process from closing. Node by default wraps the pipes and if they're not listened to it will
-	// not block closing. This behavior is not yet replicated (not sure if easily possible).
-	if (stdioPipeNames) {
-		stdioPipeNames.forEach((pipeName, fd) => {
-			if (fd <= 2) return
-			stdio.push(pipeName && createNamedPipe(pipeName))
-		})
-	}
+	stdioPipeNames
+		.filter((pipeName, fd) => fd > 2)
+		.filter(pipeName => !!pipeName)
+		.forEach(pipeName => stdio.push(createNamedPipe(pipeName)))
 
 }

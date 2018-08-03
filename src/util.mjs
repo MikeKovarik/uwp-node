@@ -104,6 +104,7 @@ export function createNamedPipe(name, maskFd = true) {
 	var onConnect = () => {
 		channel.connected = true
 		channel.removeListener('error', onError)
+		channel.unref()
 	}
 	channel.on('error', onError)
 	channel.connect(path, onConnect)
