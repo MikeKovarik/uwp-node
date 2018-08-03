@@ -139,6 +139,8 @@ namespace UwpNodeBroker {
 		}
 
 		public void Dispose() {
+			if (Disposed) return;
+			Disposed = true;
 			while (Servers.Count > 0)
 				DisposePipe(Servers[0]);
 			while (Clients.Count > 0)
@@ -149,7 +151,6 @@ namespace UwpNodeBroker {
 			Connection = null;
 			End = null;
 			Error = null;
-			Disposed = true;
 		}
 
 		public async Task Write(string message, NamedPipeServerStream exclude = null) {

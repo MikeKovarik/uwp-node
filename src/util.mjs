@@ -69,7 +69,6 @@ export function setupChannel(target, channel) {
 
 	channel.once('end', () => {
 		channel.connected = false
-	// TODO: to be tested
 		target.emit('disconnect')
 	})
 

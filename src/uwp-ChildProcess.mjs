@@ -271,8 +271,7 @@ export class ChildProcess extends EventEmitter {
 		}
 
 		// Fill stdio with defaults (three ignores) if none other
-		while (stdio.length < 3)
-			stdio.push('ignore')
+		while (stdio.length < 3) stdio.push(undefined)
 		stdio = stdio.map((type, fd) => {
 			if (type === null || type === undefined)
 				return fd < 3 ? 'pipe' : 'ignore'

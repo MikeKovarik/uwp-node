@@ -33,6 +33,10 @@ if (isNode) {
 			})
 		}
 
+		// TODO: future idea: have 'ready' event on ChildProcess that fires once
+		//       the process starts, has pid, and is connected to broker pipe (takes a few millis)
+		//broker.on('connect', () => console.log('broker ready'))
+
 	} else {
 
 		// This code runs in Node.js process that was not spawned by UWP.
