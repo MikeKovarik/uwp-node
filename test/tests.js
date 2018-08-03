@@ -72,7 +72,6 @@ describe('spawn args sanitization and encoding', function() {
 		})
 	}
 
-	/*
 	// basics
 	testSanitizeArgsSpawn(' ')
 	testSanitizeArgsSpawn('\'')
@@ -104,11 +103,9 @@ describe('spawn args sanitization and encoding', function() {
 	// more complex
 	testSanitizeArgsSpawn('"test\\"\\"123\\"\\"234"')
 	testSanitizeArgsSpawn('\'hello\' \'world\'')
-	*/
 	// clusterfuck
 	testSanitizeArgsSpawn('hello world', '"C:\\Program Filles/node"', 'k\nthx\nbye')
 	testSanitizeArgsSpawn("arg1", "an argument with whitespace", 'even some "quotes"')
-	/*
 	// more madness
 	testSanitizeArgsSpawn('\\"hello\\ world')
 	testSanitizeArgsSpawn('\\hello\\12\\3\\')
@@ -119,9 +116,9 @@ describe('spawn args sanitization and encoding', function() {
 	testSanitizeArgsSpawn('foo\\ bar')
 	testSanitizeArgsSpawn('foo \\bar')
 	testSanitizeArgsSpawn('foo\\nbar')
-	*/
 
 })
+
 
 
 
@@ -285,19 +282,6 @@ describe(`basic closing and killing, 'exit' & 'close' events`, function() {
 		assert.isFalse(closed, `should not have emitted 'close'`)
 		assert.isNull(child.exitCode, 'exitCode should be still null')
 		await child.kill()
-	})
-
-	it(`process does not close if it has IPC and 'message' listener`, async () => {
-		var stdio = ['pipe', 'pipe', 'pipe', 'ipc']
-		var child = spawn(NODE, [scriptEndless], {stdio})
-		var closed = false
-		child.once('close', () => closed = true)
-		await promiseTimeout(200)
-		assert.isFalse(closed, `should not have emitted 'close'`)
-		await child.kill()
-		assert.isFalse(closed, `should not have emitted 'close'`)
-		await promiseTimeout(200)
-		assert.isTrue(closed, `should have emitted 'close' already`)
 	})
 
 })
@@ -502,9 +486,9 @@ describe('public IPC', () => {
 			var messages = []
 			child.on('message', message => messages.push(message))
 			var now = Date.now()
-			await promiseEvent(child, 'message')
-			await promiseTimeout(500)
-			assert.isNotEmpty(messages)
+			await promiseEvent(child, 'exit')
+			assert.isNotEmpty(messages, 'should receive messages')
+			assert.equal(messages.length, 7, 'should receive all 7 messages')
 			await child.kill()
 		})
 
@@ -527,10 +511,10 @@ describe('public IPC', () => {
 			child.on('message', message => messages.push(message))
 			await promiseEvent(child, 'message')
 			await promiseTimeout(500)
-			assert.equal(messages[0], null)
-			assert.equal(messages[1], 20)
-			assert.equal(messages[2], true)
-			assert.equal(messages[3], 'Nothing is true')
+			assert.equal(messages[0], 'Nothing is true')
+			assert.equal(messages[1], null)
+			assert.equal(messages[2], 20)
+			assert.equal(messages[3], true)
 			assert.isArray(messages[4])
 			assert.isObject(messages[5])
 			// Buffer is not reconstructed as Buffer instance.
@@ -552,7 +536,9 @@ isMock && describe('internal IPC', function() {
 
 	it(`UWP -> broker -> child process`, async () => {
 		var child = spawn(NODE, ['./fixtures/child-iipc-listener.js'])
-		await promiseEvent(child, 'pid')
+		// TODO: future idea: have 'ready' event on ChildProcess that fires once
+		//       the process starts, has pid, and is connected to broker pipe (takes a few millis)
+		await promiseTimeout(200)
 		broker.send('foobar')
 		var stdout = (await promiseEvent(child.stdout, 'data')).toString().trim()
 		assert.equal(stdout, 'foobar')
@@ -585,41 +571,6 @@ describe(`stdio variations`, function() {
 			await child.kill()
 		})
 
-		// This just cannot be reliably tested
-		/*
-		if (isMock) {
-
-			// NOTE: \r get lost due to of C#'s way of capturing stdout. But \n are ok.
-			it(`'inherit' pipes all children stdio into parent`, async () => {
-				var logs = []
-				var errors = []
-				var stdout_write = process.stdout.write
-				process.stdout.write = (chunks, encoding, fd) => {
-					logs.push(chunks.toString().trim())
-					return stdout_write.call(process.stdout, chunks, encoding, fd)
-				}
-				var stderr_write = process.stderr.write
-				process.stderr.write = (chunks, encoding, fd) => {
-					errors.push(chunks.toString().trim())
-					return stderr_write.call(process.stderr, chunks, encoding, fd)
-				}
-				var child
-				try {
-					var stdio = 'inherit'
-					child = spawn(NODE, [scriptSimple], {stdio})
-					await promiseEvent(child, 'exit')
-				} catch(err) {}
-				process.stdout.write = stdout_write
-				process.stderr.write = stderr_write
-				assert.isNotEmpty(logs)
-				assert.isNotEmpty(errors)
-				assert.include(logs, 'console.log > stdout')
-				assert.include(errors, 'console.error > stderr')
-				await child.kill()
-			})
-
-		}
-		*/
 	})
 
 	describe(`stdio: default`, function() {
@@ -731,7 +682,7 @@ function childHasIpcMethods(stdio) {
 }
 
 function describeExitAndCloseEvents(stdio) {
-	describe(`IPC`, function() {
+	describe(`IPC`, function() { // TODO: reenable
 		if (stdio && stdio.includes('ipc')) {
 			parentHasIpcMethods(stdio)
 			childHasIpcMethods(stdio)
@@ -745,6 +696,8 @@ function describeExitAndCloseEvents(stdio) {
 		testEmitsClose(stdio, scriptSimple)
 		testEmitsExit(stdio, scriptDelayed)
 		testEmitsClose(stdio, scriptDelayed)
+		testEmitsExit(stdio, scriptIpcBasic)
+		testEmitsClose(stdio, scriptIpcBasic)
 		testEmitsStdoutAndStderrBeforeClose(stdio, scriptSimple)
 	})
 }

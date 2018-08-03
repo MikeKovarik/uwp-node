@@ -28,6 +28,7 @@ describe('uwp-node UWP mocked in console', function() {
 		// TODO: delete this line once internal IPC (IIPC) works and kill() can work on its own.
 		broker.connection && broker.connection.proc && broker.connection.proc.kill()
 		broker.kill()
+		setTimeout(() => process.exit(0), 1000)
 	})
 
 	require('./tests.js')
