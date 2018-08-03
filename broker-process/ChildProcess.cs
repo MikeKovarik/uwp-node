@@ -13,11 +13,20 @@ namespace UwpNodeBroker {
 
 	class ChildProcess {
 
+		private const int STDIN  = 0;
+		private const int STDOUT = 1;
+		private const int STDERR = 2;
+
 		private ValueSet req;
 		private Process Proc;
 		private ProcessStartInfo Info;
 		private NamedPipe[] Pipes;
-		private string[] Stdio = new string[0];
+		private string[] Stdio;
+		// Semaphore for STDOUT/STDERR.
+		// Exited event is in most cases emitted before OutputDataReceived and thus before reading STDIO
+		// was finished. Using these Task we can safely run after-exit code once all three Tasks are completed
+		private List<Task<object>> StdioTasks;
+		private List<TaskCompletionSource<object>> StdioTaskSources;
 
 		public int Cid;
 		public bool Killed = false;
@@ -35,6 +44,7 @@ namespace UwpNodeBroker {
 				SetupInfo();
 				SetupStdio();
 				SetupStdioPipes();
+				SetupStdioHandlers();
 				// Start the process.
 				Spawn();
 			} catch (Exception err) {
@@ -69,15 +79,31 @@ namespace UwpNodeBroker {
 		private void SetupStdio() {
 			// Pipes need to be created before the node process even starts
 			if (req.ContainsKey("stdio")) {
-				Stdio = (req["stdio"] as string).Split('|');
-				for (int i = 0; i < Stdio.Length; i++) {
-					// stdio array from js comes in stringified so the nulls have to be tured into proper null again.
-					if (Stdio[i] == "null" || Stdio[i] == "ignore")
-						Stdio[i] = null;
-				}
+				Stdio = (req["stdio"] as string)
+					.Split('|')
+					.Select((string name) => {
+						// Stdio array from js comes stringified so the nulls have to be tured into proper null again.
+						if (name == "null" || name == "ignore") return null;
+						return name;
+					})
+					.ToArray();
 			} else {
 				Stdio = new string[0];
 			}
+			// List of kinda lika JS Promises we're using to block emiting 'exit' and exitCode
+			// before all stdio streams and pipes are done sending data.
+			StdioTaskSources = Stdio
+				.Select((name, i) => {
+					if (i == 0) return null;
+					if (name == null) return null;
+					return new TaskCompletionSource<object>();
+				})
+				.ToList();
+			// ... but C# just cannot play nice like JS does and has to have two objects for resolving Task (Promise).
+			StdioTasks = StdioTaskSources
+				.Select(source => source?.Task)
+				.ToList();
+
 
 			Info.StandardOutputEncoding = Encoding.UTF8;
 			Info.StandardErrorEncoding = Encoding.UTF8;
@@ -93,22 +119,15 @@ namespace UwpNodeBroker {
 			Pipes = new NamedPipe[Stdio.Length];
 			List<String> pipeNames = new List<String>();
 			// Skip the holy trinity of STDIO (IN/OUT/ERR) and start at custom pipes.
-			int fd = 3;
 			// Few variables used for creation of pipe name.
 			var brokerPid = Process.GetCurrentProcess().Id;
 			// Create custom pipes for the other remaining (defined by user) stdio pipes.
-			foreach (var type in Stdio.Skip(fd)) {
+			for (int fd = 3; fd < Stdio.Length; fd++) {
 				var name = $"uwp-node\\{Cid}-{fd}-{brokerPid}";
 				pipeNames.Add(name);
 				var pipe = new NamedPipe(name);
 				pipe.fd = fd;
-				// Handle and report all output and errors of the pipe.
-				pipe.Data += async (data, p) => await ReportData(data, pipe.fd);
-				pipe.Error += async (err, p) => await ReportError(err, pipe.fd);
-				// Pushing null to stream causes it to close and emit 'end' event.
-				pipe.End += async () => await ReportData(null, pipe.fd);
 				Pipes[fd] = pipe;
-				fd++;
 			}
 			// SIDE-NOTE: Because there's no easy way of creating libuv-style named-pipes that would get picked up by node
 			// natively, we have to pass in through env vars custom list of names of pipes that we're creating in C#
@@ -123,49 +142,69 @@ namespace UwpNodeBroker {
 			}
 		}
 
+		private void SetupStdioHandlers() {
+			// Attach handlers for STDOUT and STDERR
+			// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
+			// where it naturally ends the stream (uses the same 'stream' library from Node's core)
+			if (Info.RedirectStandardOutput) Proc.OutputDataReceived += OnStdout;
+			if (Info.RedirectStandardError)  Proc.ErrorDataReceived  += OnStderr;
+			foreach (var pipe in Pipes.Skip(3)) {
+				// Handle and report all output and errors of the pipe.
+				pipe.Data += async (data, p) => await ReportData(data, pipe.fd);
+				pipe.Error += async (err, p) => await ReportError(err, pipe.fd);
+				// Pushing null to stream causes it to close and emit 'end' event.
+				pipe.End += async () => await ReportData(null, pipe.fd);
+			}
+		}
+
+		private async void OnStdout(object s, DataReceivedEventArgs e) {
+			if (e.Data?.Length > 0) {
+				await ReportData(e.Data + "\n", STDOUT);
+			} else if (e.Data == null) {
+				await ReportData(null, STDOUT);
+			}
+		}
+
+		private async void OnStderr(object s, DataReceivedEventArgs e) {
+			if (e.Data?.Length > 0) {
+				await ReportData(e.Data + "\n", STDERR);
+			} else if (e.Data == null) {
+				await ReportData(null, STDERR);
+			}
+		}
+
+		// This method gets called after exit event when we want to nudge all STDIO to start closing.
+		// 1) STDOUT and STDERR should close by barfing null one last time, but from time to time they dont.
+		// 2) Named pipes generally collapse on itself. BUT only when user actually uses them in the code
+		//    I.E. when he/she imports uwp-node.js in their node code. But if forgotten, the pipe cannot close
+		//    because it hasnt even started and connected to anything yet.
+		private async void StartClosingStdio() {
+			for (int fd = 3; fd < Pipes.Length; fd++) {
+				var pipe = Pipes[fd];
+				if (pipe == null) continue;
+				if (pipe.Connected) continue;
+				pipe.Dispose();
+			}
+			await Task.Delay(500);
+			if (StdioTasks == null) return;
+			// Making sure the STDOUT and STDERR emit null.
+			// This will unlock the onexited semaphore/task which will lead to disposal.
+			if (Info.RedirectStandardOutput && !StdioTasks[1].IsCompleted)
+				ReportData(null, STDOUT);
+			if (Info.RedirectStandardError && !StdioTasks[2].IsCompleted)
+				ReportData(null, STDERR);
+		}
+
 		// Starts the process as long running with asynchronous evented STDIO.
 		public async void Spawn() {
 			try {
-				// Semaphore for STDOUT/STDERR and exited events.
-				// Exited event is in most cases emitted before OutputDataReceived and thus before reading STDIO
-				// was finished. Using these Task we can safely run after-exit code once all three Tasks are completed
-				// e.g. once STDOUT and STDERR are read and once Exited event is fired.
-				// Task objects th
-				var exitedEvent = new TaskCompletionSource<object>();
-				var stdoutEvent = new TaskCompletionSource<object>();
-				var stderrEvent = new TaskCompletionSource<object>();
-
 				// Handle lifecycle events
 				Proc.EnableRaisingEvents = true;
-				// Resolves one of the three events in semaphore.
-				Proc.Exited   += (s, e) => exitedEvent.SetResult(null);
+				// Resolves one of the exitCode and 'exit' event blocking semaphore/Task/Promises.
+				Proc.Exited += OnExit;
 				// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
 				// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
 				Proc.Disposed += (s, e) => Dispose();
-
-				// Attach handlers for STDOUT and STDERR
-				// NOTE: Once the stream ends, it will call this method with e.Data=null. We then propagate the null to UWP
-				// where it naturally ends the stream (uses the same 'stream' library from Node's core)
-				if (Info.RedirectStandardOutput) {
-					Proc.OutputDataReceived += async (s, e) => {
-						if (e.Data?.Length > 0) {
-							await ReportData(e.Data + "\n", 1);
-						} else if (e.Data == null) {
-							await ReportData(null, 1);
-							stdoutEvent.SetResult(null);
-						}
-					};
-				}
-				if (Info.RedirectStandardError) {
-					Proc.ErrorDataReceived += async (s, e) => {
-						if (e.Data?.Length > 0) {
-							await ReportData(e.Data + "\n", 2);
-						} else if (e.Data == null) {
-							await ReportData(null, 2);
-							stderrEvent.SetResult(null);
-						}
-					};
-				}
 
 				// Start the process and begin receiving data on STDIO streams.
 				Proc.Start();
@@ -175,26 +214,32 @@ namespace UwpNodeBroker {
 				// Report back first basic information about the established process.
 				await Report("pid", Proc.Id);
 
-				// Now that we reported PID and the process is running, await it's exit and 
-				await Task.WhenAll(exitedEvent.Task, stdoutEvent.Task, stderrEvent.Task);
-
-				// We can now safely report exit code and dispose the process and all references.
-				if (Killed) {
-					// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
-					await Report("exitCode", null);
-				} else {
-					try {
-						await Report("exitCode", Proc.ExitCode);
-					} catch {
-						// general error
-						await Report("exitCode", 1);
-					}
-				}
-
-				Dispose();
+				// Now that we reported PID and the process is running, we're waiting for exit event
+				// all all STDIOs to be closed and sent before we can dispose all resources.
 			} catch (Exception err) {
 				HandleError(err);
 			}
+		}
+
+		public async void OnExit(object s, object e) {
+			Proc.WaitForExit();
+			// It's necessary to call this in order to flush STDOUT & STDERR.
+			StartClosingStdio();
+			await Task.WhenAll(StdioTasks.Where(task => task != null));
+			// We can now safely report exit code and dispose the process and all references.
+			if (Killed) {
+				// Node processes treat killed processes with null exit code as opposed to C# which uses -1.
+				await Report("exitCode", null);
+			} else {
+				try {
+					await Report("exitCode", Proc.ExitCode);
+				} catch {
+					// general error
+					await Report("exitCode", 1);
+				}
+			}
+			// Kill it with fire.
+			Dispose();
 		}
 
 		private async void HandleError(Exception err) {
@@ -204,6 +249,8 @@ namespace UwpNodeBroker {
 					break;
 				default:
 					await ReportError(err.Message, err.StackTrace);
+					// TODO: should the process be killed?
+					// TODO: more research and testing.
 					break;
 			}
 			Dispose();
@@ -232,6 +279,8 @@ namespace UwpNodeBroker {
 			message.Add("fd", fd);
 			message.Add("data", data);
 			await Report(message);
+			if (data == null && StdioTaskSources != null)
+				StdioTaskSources[fd].TrySetResult(null);
 		}
 
 		private async Task ReportError(object err, int fd) {
@@ -239,6 +288,8 @@ namespace UwpNodeBroker {
 			message.Add("fd", fd);
 			message.Add("error", err);
 			await Report(message);
+			if (StdioTaskSources != null)
+				StdioTaskSources[fd].TrySetResult(null);
 		}
 
 		private async Task ReportError(string err, string stack) {
@@ -248,11 +299,11 @@ namespace UwpNodeBroker {
 			await Report(message);
 		}
 
-		private async Task ReportError(object err) {
+		/*private async Task ReportError(object err) {
 			ValueSet message = new ValueSet();
 			message.Add("error", err);
 			await Report(message);
-		}
+		}*/
 
 		private async Task Report(string key, object val) {
 			ValueSet message = new ValueSet();
@@ -282,8 +333,8 @@ namespace UwpNodeBroker {
 			//Console.WriteLine($"### Dispose {Cid}");
 			if (Proc != null) {
 				try {
-					//Proc.Disposed -= OnDisposed;
-					//Proc.Exited -= OnExited;
+					if (Info.RedirectStandardOutput) Proc.OutputDataReceived -= OnStdout;
+					if (Info.RedirectStandardError)  Proc.ErrorDataReceived  -= OnStderr;
 					Proc.Close();
 					Proc.Dispose();
 				} catch { }
@@ -297,6 +348,8 @@ namespace UwpNodeBroker {
 				Proc = null;
 				Info = null;
 				Stdio = null;
+				StdioTasks = null;
+				StdioTaskSources = null;
 				Pipes = null;
 				Disposed?.Invoke();
 				Disposed = null;
