@@ -552,6 +552,7 @@ isMock && describe('internal IPC', function() {
 
 	it(`UWP -> broker -> child process`, async () => {
 		var child = spawn(NODE, ['./fixtures/child-iipc-listener.js'])
+		await promiseEvent(child, 'pid')
 		broker.send('foobar')
 		var stdout = (await promiseEvent(child.stdout, 'data')).toString().trim()
 		assert.equal(stdout, 'foobar')

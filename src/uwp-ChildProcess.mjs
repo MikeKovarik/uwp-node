@@ -118,7 +118,7 @@ export class ChildProcess extends EventEmitter {
 		//console.log('_onMessage()', this.cid, JSON.stringify(res))
 		// Only accept messages with matching Custom Id of this process.
 		if (res.cid !== this.cid) return
-		if (res.pid !== null) this.pid = res.pid
+		if (res.pid !== null && res.pid !== undefined) this.emit('pid', this.pid = res.pid)
 		if (res.exitCode !== undefined) this._onExit(res.exitCode)
 		if (res.fd !== undefined) {
 			// Messages (and errors) can be further scoped down to specific stream (specified by its fd).

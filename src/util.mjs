@@ -73,19 +73,31 @@ export function setupChannel(target, channel) {
 		target.emit('disconnect')
 	})
 
-	// TODO: this handles IPC channel at process.on('message'), but do the same for custom process pipes as well.
+	// Make sure the IPC channel doesn't block user's code from exitting when it's dode.
+	ensureDoesntBlockExitting(channel, target)
+
+	handleStreamJson(channel, message => target.emit('message', message))
+}
+
+// IPC channel and custom pipes hav some internal listeners in to make sure everything works and messages
+// get where they need. But it shouldn't be blocking users code from exitting when it's done.
+// TODO: this handles IPC channel at process.on('message'), but do the same for custom process pipes as well.
+export function ensureDoesntBlockExitting(channel, target = channel) {
+	// Makes sure the channel won't block closing
+	if (channel.unref)
+		channel.unref()
 	var listeners = 0
 	var isIpcEvent = name => name === 'message' || name === 'disconnect'
 	target.on('removeListener', name => {
+		// When all listeners are removed, make sure we're not blocking anymore
 		if (isIpcEvent(name) && --listeners === 0 && channel.unref)
 			channel.unref()
 	})
 	target.on('newListener', name => {
+		// When user attaches some event listener, make the channel attached again.
 		if (isIpcEvent(name) && listeners++ === 0 && channel.ref)
 			channel.ref()
 	})
-
-	handleStreamJson(channel, message => target.emit('message', message))
 }
 
 

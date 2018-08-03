@@ -1,5 +1,5 @@
 import {EventEmitter} from 'events'
-import {isNode, newLineFeedSplitter, setupChannel} from './util.mjs'
+import {isNode, newLineFeedSplitter, ensureDoesntBlockExitting} from './util.mjs'
 import {createNamedPipe} from './util.mjs'
 import {parseIipcMessage, stringifyIipcMessage} from './iipc.mjs'
 
@@ -18,11 +18,13 @@ if (isNode) {
 		delete env['uwp-node-stdio-iipc']
 
 		broker = createNamedPipe(pipeName, false)
-
+		// Unrefs/Refs the channel whenever needed
+		ensureDoesntBlockExitting(broker)
+		// Handle incomming Internal-IPC messages, emit them as 'message' on broker.
 		newLineFeedSplitter(broker, line => {
 			broker.emit('message', ...parseIipcMessage(line))
 		})
-
+		// Enable sending IIPC messages through broker.send()
 		broker.send = (...args) => {
 			return new Promise((resolve, reject) => {
 				if (!broker.connected)
