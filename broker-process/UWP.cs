@@ -22,14 +22,17 @@ namespace UwpNodeBroker {
 		//       the app would then go on to create new background process, rather than reconnecting to this one.
 
 		// Connection to UWP app
+		// TODO: rename to conn
 		static public AppServiceConnection connection = null;
 
+		// TODO: rename to Connected
 		static public bool isConnected {
 			get { return connection != null; }
 		}
 
 		// Fires when connection to UWP app has been establised.
 		// Either right after launch of the background process, or later on when the app is restarted.
+		// TODO: rename to Connection
 		static public event Action Connected;
 		// Fires when connection to UWP app has been lost.
 		// Usually when the app closes or crashes.

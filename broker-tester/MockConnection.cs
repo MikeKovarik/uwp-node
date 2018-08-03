@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
 using System.Linq;
+using System.IO.Pipes;
 
 
 namespace UwpNodeBroker {
@@ -25,18 +26,18 @@ namespace UwpNodeBroker {
 			var pipeName = $"uwp-node-broker-tester-{pipeId}";
 			pipe = new NamedPipe(pipeName);
 			pipe.Data += OnBytes;
+			//pipe.Data += OnBytes;
 			Console.WriteLine($"CREATED IPC PIPE: {pipeName}"); // DO NOT DELETE
 		}
 
-		private void OnBytes(byte[] buffer) {
+		private void OnBytes(byte[] buffer, NamedPipeServerStream p) {
 			try {
 				jsonBuffer += Encoding.Default.GetString(buffer);
 				List<string> messages = jsonBuffer.Split('\n').ToList();
-				var incomplete = messages.Last();
+				jsonBuffer = messages.Last();
 				foreach (string message in messages.Take(messages.Count - 1)) {
 					OnJson(message);
 				}
-				jsonBuffer = incomplete;
 			} catch { }
 		}
 

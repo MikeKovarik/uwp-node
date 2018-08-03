@@ -58,8 +58,9 @@ namespace UwpNodeBroker {
 			try {
 				pipe.WaitForConnection();
 			} catch (Exception err) {
-				// NOTE: WaitForConnection() throws if no connection is received and pipe closes.
-				OnError(pipe, err);
+				// WaitForConnection() throws if no connection is received and pipe closes.
+				// We don't consider it an error but just a simple closing.
+				OnError(pipe, err, false);
 				Ready.TrySetResult(false);
 				return;
 			}
@@ -105,9 +106,11 @@ namespace UwpNodeBroker {
 			}
 		});
 
-		private void OnError(NamedPipeServerStream pipe, Exception err) {
-			Console.WriteLine($"C#: NamedPipe ERROR {name} - {err}");
-			Error?.Invoke(err.ToString(), pipe);
+		private void OnError(NamedPipeServerStream pipe, Exception err, bool isError = true) {
+			if (isError) {
+				Console.WriteLine($"C#: NamedPipe ERROR {name} - {err}");
+				Error?.Invoke(err.ToString(), pipe);
+			}
 			OnDisconnect(pipe);
 		}
 

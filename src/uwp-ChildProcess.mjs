@@ -102,7 +102,7 @@ export class ChildProcess extends EventEmitter {
 		// but we can only get async errors, so we always need to setup everything.
 		this._setupStdio(options.stdio)
 		// Launch and start receving messages from C# broker.
-		this._attachToBroker()
+		broker.on('internalMessage', this._onMessage)
 
 		// Passing the important and custom fields to C#.
 		// UWP ValueSet does not accept arrays, so we have to stringify it.
@@ -112,28 +112,6 @@ export class ChildProcess extends EventEmitter {
 			options.args = escapeCsharpArguments(options.args)
 
 		broker._internalSend(options)
-	}
-
-
-	// Attaches current instance (now that we now PID of the remotely created process)
-	// to the uwp-node broker process that notifies us about all of STDIO and custom pipes
-	// though 'internalMessage' event.
-	_attachToBroker() {
-		//console.log('----------------------------------------------------------------')
-		//console.log('_attachToBroker()', this.cid)
-		//console.log('----------------------------------------------------------------')
-		for (var pipe of this._stdioAll) {
-			if (!(pipe instanceof Writable)) continue
-			pipe._write = (chunk, encoding, cb) => {
-				var req = {
-					cid: this.cid,
-					fd: pipe.fd,
-					data: chunk,
-				}
-				broker._internalSend(req).then(cb)
-			}
-		}
-		broker.on('internalMessage', this._onMessage)
 	}
 
 	_onMessage(res) {
@@ -317,24 +295,43 @@ export class ChildProcess extends EventEmitter {
 			if (type === 'ignore')
 				return null
 			if (fd === STDIN)
-				return new Writable
-			if (fd === STDOUT || fd === STDERR)
+				var stream = new Writable
+			else if (fd === STDOUT || fd === STDERR)
 				var stream = new Readable
 			else
 				var stream = new Duplex
-			if (type === 'ipc')
-				stream.ipc = true
-			// Reading can't be forced
-			stream._read = () => {}
-			// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.
-			this._closesNeeded++
+			if (type === 'ipc') stream.ipc = true
 			stream.fd = fd
-			// Broker is only capable of ending the stream (pushing null results in 'end' event)
-			// but we have to take care of emitting 'close' on each stream ourselves.
-			stream.once('end', () => setTimeout(() => stream.emit('close')))
-			stream.once('close', this._maybeClose)
 			return stream
 		})
+
+		this._stdioAll
+			.filter(stream => stream instanceof Readable)
+			.forEach(stream => {
+				// Reading can't be forced
+				stream._read = () => {}
+				// Process only emits 'close' when all stdio (readable or duplex) pipes are closed.
+				this._closesNeeded++
+				// Broker is only capable of ending the stream (pushing null results in 'end' event)
+				// but we have to take care of emitting 'close' on each stream ourselves.
+				stream.once('end', () => setTimeout(() => stream.emit('close')))
+				stream.once('close', this._maybeClose)
+			})
+
+		// Reroutes all writes from stdio pipes to the broker process.
+		this._stdioAll
+			.filter(stream => stream instanceof Writable)
+			.forEach(stream => {
+				stream.connected = true
+				stream._write = (chunk, encoding, cb) => {
+					var req = {
+						cid: this.cid,
+						fd: stream.fd,
+						data: chunk,
+					}
+					broker._internalSend(req).then(cb)
+				}
+			})
 
 		// this._stdioAll represents all process' stream instances, including those usually hidden by IPC, ignore or FD.
 		// this.stdio is list of streams accessible by user, some of which might be null (managed by Node)
@@ -353,9 +350,8 @@ export class ChildProcess extends EventEmitter {
 				this.stdio[fd] = null
 				// Create Duplex stream on which messages will be received,
 				var ipc = this._stdioAll[fd]
-				// Attach Duplex IPC stream to this.channel, create send() and disconnect() methods,
-				// handle and parse incomming data and re-emit it as 'message' events.
-				// NOTE: setupChannel() assigns this.channel=ipc
+				// Attaches Duplex IPC stream to this.channel, creates send() and disconnect() methods,
+				// handles and parses incomming data and re-emit it as 'message' events on this.
 				setupChannel(this, ipc)
 			}
 		})
@@ -368,7 +364,7 @@ export class ChildProcess extends EventEmitter {
 		// Wire stdio and inherit-targets together by piping data between them.
 		stdio
 			// Array of user defined streams that are piped to/from child process' stdio streams.
-			// i.e. FD numbers, custom streams
+			// i.e. FD numbers, custom Stream instances
 			.map(streamOrFd => {
 				// User can specify FD numbers 0-2 signifying main process' stdin, stdout and stderr.
 				// Node also handles more FDs beyond 2, but we don't have access to real FDs. So only 1-2 are supported.
