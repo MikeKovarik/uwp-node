@@ -67,7 +67,22 @@ export function setupChannel(target, channel) {
 		console.warn('disconnect() not implemented') // TODO
 	}
 
-	channel.once('end', () => channel.connected = false)
+	// TODO: to be tested
+	channel.once('close', () => {
+		target.emit('disconnect')
+	})
+
+	// TODO: this handles IPC channel at process.on('message'), but do the same for custom process pipes as well.
+	var listeners = 0
+	var isIpcEvent = name => name === 'message' || name === 'disconnect'
+	target.on('removeListener', name => {
+		if (isIpcEvent(name) && --listeners === 0)
+			channel.unref()
+	})
+	target.on('newListener', name => {
+		if (isIpcEvent(name) && listeners++ === 0)
+			channel.ref()
+	})
 
 	handleStreamJson(channel, message => target.emit('message', message))
 }
@@ -104,10 +119,10 @@ export function createNamedPipe(name, maskFd = true) {
 	var onConnect = () => {
 		channel.connected = true
 		channel.removeListener('error', onError)
-		channel.unref()
 	}
 	channel.on('error', onError)
 	channel.connect(path, onConnect)
+	channel.unref()
 	// Create fake fd. Doesn't really do anything.
 	if (maskFd) {
 		var uselessFd = fs.openSync('\\\\.\\NUL', 'r')
