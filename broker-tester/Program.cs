@@ -17,12 +17,7 @@ namespace UwpNodeBroker {
 
 		[STAThread]
 		static void Main() {
-			UWP.Init();
 			IPC.Init();
-			ChildProcesses.Init();
-
-			UWP.connection = new MockAppServiceConnection();
-
 			Application.Run();
 		}
 

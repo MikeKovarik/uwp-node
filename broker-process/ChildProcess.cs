@@ -11,7 +11,7 @@ using Windows.Foundation.Collections;
 
 namespace UwpNodeBroker {
 
-	class ChildProcess {
+	class ChildProcess : IDisposable {
 
 		private const int STDIN  = 0;
 		private const int STDOUT = 1;
@@ -30,6 +30,7 @@ namespace UwpNodeBroker {
 
 		public int Cid;
 		public bool Killed = false;
+		public bool IsDisposed = false;
 		public event Action Disposed;
 
 
@@ -158,19 +159,17 @@ namespace UwpNodeBroker {
 		}
 
 		private async void OnStdout(object s, DataReceivedEventArgs e) {
-			if (e.Data?.Length > 0) {
+			if (e.Data?.Length > 0)
 				await ReportData(e.Data + "\n", STDOUT);
-			} else if (e.Data == null) {
+			else if (e.Data == null)
 				await ReportData(null, STDOUT);
-			}
 		}
 
 		private async void OnStderr(object s, DataReceivedEventArgs e) {
-			if (e.Data?.Length > 0) {
+			if (e.Data?.Length > 0)
 				await ReportData(e.Data + "\n", STDERR);
-			} else if (e.Data == null) {
+			else if (e.Data == null)
 				await ReportData(null, STDERR);
-			}
 		}
 
 		// This method gets called after exit event when we want to nudge all STDIO to start closing.
@@ -179,6 +178,7 @@ namespace UwpNodeBroker {
 		//    I.E. when he/she imports uwp-node.js in their node code. But if forgotten, the pipe cannot close
 		//    because it hasnt even started and connected to anything yet.
 		private async void StartClosingStdio() {
+			if (IsDisposed) return;
 			for (int fd = 3; fd < Pipes.Length; fd++) {
 				var pipe = Pipes[fd];
 				if (pipe == null) continue;
@@ -186,7 +186,7 @@ namespace UwpNodeBroker {
 				pipe.Dispose();
 			}
 			await Task.Delay(500);
-			if (StdioTasks == null) return;
+			if (IsDisposed) return;
 			// Making sure the STDOUT and STDERR emit null.
 			// This will unlock the onexited semaphore/task which will lead to disposal.
 			if (Info.RedirectStandardOutput && !StdioTasks[1].IsCompleted)
@@ -202,28 +202,21 @@ namespace UwpNodeBroker {
 				Proc.EnableRaisingEvents = true;
 				// Resolves one of the exitCode and 'exit' event blocking semaphore/Task/Promises.
 				Proc.Exited += OnExit;
-				// The class has been disposed (and futher attempts to do so within the methods will fail, throw and be caught)
-				// but we need to make sure that the pipes and other objects are all cleared of all references to this process.
-				Proc.Disposed += (s, e) => Dispose();
-
 				// Start the process and begin receiving data on STDIO streams.
 				Proc.Start();
 				if (Info.RedirectStandardOutput) Proc.BeginOutputReadLine();
 				if (Info.RedirectStandardError)  Proc.BeginErrorReadLine();
-
 				// Report back first basic information about the established process.
 				await Report("pid", Proc.Id);
-
-				// Now that we reported PID and the process is running, we're waiting for exit event
-				// all all STDIOs to be closed and sent before we can dispose all resources.
+				// This should ensure that STDOUT and STDERR are flushed and EOF'd after exit. 
+				Proc.WaitForExit();
 			} catch (Exception err) {
 				HandleError(err);
 			}
 		}
 
 		public async void OnExit(object s, object e) {
-			Proc.WaitForExit();
-			// It's necessary to call this in order to flush STDOUT & STDERR.
+			// Force closure of STDOUT & STDERR and named pipes if they aren't closed in a reasonable while.
 			StartClosingStdio();
 			await Task.WhenAll(StdioTasks.Where(task => task != null));
 			// We can now safely report exit code and dispose the process and all references.
@@ -279,7 +272,7 @@ namespace UwpNodeBroker {
 			message.Add("fd", fd);
 			message.Add("data", data);
 			await Report(message);
-			if (data == null && StdioTaskSources != null)
+			if (data == null)
 				StdioTaskSources[fd].TrySetResult(null);
 		}
 
@@ -288,8 +281,7 @@ namespace UwpNodeBroker {
 			message.Add("fd", fd);
 			message.Add("error", err);
 			await Report(message);
-			if (StdioTaskSources != null)
-				StdioTaskSources[fd].TrySetResult(null);
+			StdioTaskSources[fd].TrySetResult(null);
 		}
 
 		private async Task ReportError(string err, string stack) {
@@ -298,12 +290,6 @@ namespace UwpNodeBroker {
 			message.Add("stack", stack);
 			await Report(message);
 		}
-
-		/*private async Task ReportError(object err) {
-			ValueSet message = new ValueSet();
-			message.Add("error", err);
-			await Report(message);
-		}*/
 
 		private async Task Report(string key, object val) {
 			ValueSet message = new ValueSet();
@@ -330,29 +316,23 @@ namespace UwpNodeBroker {
 
 		// Closes the process, releases all resources & emits Disposed event.
 		public void Dispose() {
-			//Console.WriteLine($"### Dispose {Cid}");
-			if (Proc != null) {
-				try {
-					if (Info.RedirectStandardOutput) Proc.OutputDataReceived -= OnStdout;
-					if (Info.RedirectStandardError)  Proc.ErrorDataReceived  -= OnStderr;
-					Proc.Close();
-					Proc.Dispose();
-				} catch { }
-			}
-			if (Pipes != null) {
-				foreach (NamedPipe pipe in Pipes) {
-					pipe?.Dispose();
-				}
-			}
-			if (Proc != null || Pipes != null) {
-				Proc = null;
-				Info = null;
-				Stdio = null;
-				StdioTasks = null;
-				StdioTaskSources = null;
-				Pipes = null;
-				Disposed?.Invoke();
-				Disposed = null;
+			if (IsDisposed == true) return;
+			IsDisposed = true;
+			Proc.Exited -= OnExit;
+			if (Info.RedirectStandardOutput) Proc.OutputDataReceived -= OnStdout;
+			if (Info.RedirectStandardError)  Proc.ErrorDataReceived  -= OnStderr;
+			try {
+				Proc.Close();
+				Proc.Dispose();
+			} catch { }
+			foreach (NamedPipe pipe in Pipes)
+				pipe?.Dispose();
+			StdioTasks.Clear();
+			StdioTaskSources.Clear();
+			if (Disposed != null) {
+				Disposed.Invoke();
+				foreach (var listener in Disposed.GetInvocationList())
+					Disposed -= (Action) listener;
 			}
 		}
 

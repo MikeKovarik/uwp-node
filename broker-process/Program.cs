@@ -33,24 +33,23 @@ namespace UwpNodeBroker {
 			// Kickstart static constructors.
 			// NOTE: All classes are static instead of instance, because they're tightly coupled singletons.
 			// But static constructors are called on demand (at first access or call to the class), not at startup.
-			UWP.Init();
-			ChildProcesses.Init();
 			IPC.Init();
-			// Open named pipe used exclusively by this BG process and other slav,e instances to communicate
-			// that slave instance has been created. Those are created when UWP app is restarted but it does
-			// not have referrence to previous (master) instance. We're using this because WMI events require
-			// admin priviledges and there are no other way of watching app or process start in C# nor UWP. 
+			// Open named pipe that is used exclusively by this background broker process and potentional future
+			// broker instances. It is used to signal wheter there's already existing broker to ensure there's always
+			// only one broker at a time. It's necessary because new instance of UWP app cannot reconnect to preexisting
+			// background process that was spawned by previous instance of the app.
 			var slavePipe = new NamedPipe(UWP.name, 100);
-			// Connect to UWP app if we detect new one has been started but it has no means of connecting to
-			// this BG process instance.
+			// If new connection occurs on the pipe, it means another broker process has been spawned by a new UWP instance
+			// that has no way of knowing of existence of (let alone connecting to) this broker process.
+			// But we can connect to the UWP from here.
 			slavePipe.Connection += () => UWP.Connect();
 			// Lifecycle & selfclose watchdog.
 			WatchReferences();
 			// Open exclusive mutex to signify that this is the master mutex process for the app.
 			mutex = new Mutex(false, UWP.name);
 			// TODO: is this even needed?
-			Application.EnableVisualStyles();
-			Application.SetCompatibleTextRenderingDefault(false);
+			Application.EnableVisualStyles(); // TODO: remove?
+			Application.SetCompatibleTextRenderingDefault(false); // TODO: remove?
 			// Run blockingly. And release the mutex when the app quits.
 			Application.Run();
 			Close();
@@ -58,7 +57,6 @@ namespace UwpNodeBroker {
 
 		// Watches state of the UWP app and child processes and kills this broker if possible.
 		static void WatchReferences() {
-			//ChildProcesses.processClosed += () => MessageBox.Show("ChildProcesses.processClosed"); // TODO. this still needs testing
 			UWP.Closed += CloseIfPossible;
 			ChildProcesses.Change += CloseIfPossible;
 			// Check every three minutes. Just in case.
@@ -72,12 +70,11 @@ namespace UwpNodeBroker {
 
 		// Closes the broker if UWP app is closed and no child processes are running.
 		static void CloseIfPossible() {
-			//MessageBox.Show($"CloseIfPossible {UWP.isConnected} {ChildProcesses.processes.Count}"); // TODO remove
 			if (!UWP.isConnected && ChildProcesses.Children.Count == 0)
 				Close();
 		}
+
 		static void Close() {
-			//MessageBox.Show("broker is closing"); // TODO remove
 			mutex.Close();
 			Environment.Exit(0);
 		}
@@ -90,8 +87,7 @@ namespace UwpNodeBroker {
 				var pipe = new NamedPipeClientStream(".", UWP.name, PipeDirection.InOut, PipeOptions.Asynchronous);
 				await pipe.ConnectAsync();
 			} catch (Exception err) {
-				// TODO remove
-				MessageBox.Show($"error {err}");
+				//MessageBox.Show($"error {err}");
 			}
 			// Close self and let the app use master broker process.
 			Environment.Exit(0);

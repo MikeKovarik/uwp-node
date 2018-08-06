@@ -29,7 +29,7 @@ if (isNode) {
 			return new Promise((resolve, reject) => {
 				if (!broker.connected)
 					reject(new Error(`not connected to uwp-node-broker`))
-				broker.write(stringifyIipcMessage(...args), resolve)
+				broker.write(stringifyIipcMessage(...args) + '\n', resolve)
 			})
 		}
 

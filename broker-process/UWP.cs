@@ -61,12 +61,12 @@ namespace UwpNodeBroker {
 		}
 
 		static public async Task Connect() {
-			if (UWP.connection != null) return;
+			if (connection != null) return;
 			connection = new AppServiceConnection();
 			connection.PackageFamilyName = Package.Current.Id.FamilyName;
 			connection.AppServiceName = serviceName;
 			connection.ServiceClosed += OnServiceClosed;
-			connection.RequestReceived += OnMessage;
+			connection.RequestReceived += async (s, e) => await EmitMessage(e.Request.Message);
 			var status = await connection.OpenAsync();
 			if (status == AppServiceConnectionStatus.Success) {
 				Connected?.Invoke();
@@ -85,7 +85,7 @@ namespace UwpNodeBroker {
 			connection = null;
 		}
 
-		static public async void OpenApp(object sender = null, EventArgs args = null) {
+		static public async void Open(object sender = null, EventArgs args = null) {
 			IEnumerable<AppListEntry> appListEntries = await Package.Current.GetAppListEntriesAsync();
 			await appListEntries.First().LaunchAsync();
 			DisposeConnection();
@@ -93,15 +93,20 @@ namespace UwpNodeBroker {
 			Opened?.Invoke();
 		}
 
-		static private async void OnMessage(AppServiceConnection sender, AppServiceRequestReceivedEventArgs e) {
-			//var messageDeferral = e.GetDeferral();
-			// Handle message and let registered handlers do whatever's needed.
-			await EmitMessage(e.Request.Message);
-			//messageDeferral.Complete();
+		static public async void Close(bool force = false) {
+			if (!isConnected) return;
+			if (force == true) {
+				// TODO: force kill the app from here
+			} else {
+				// Let the app gracefuly close itself.
+				await Send("uwp-close");
+			}
 		}
 
 		static public async Task EmitMessage(ValueSet message) {
 			try {
+				// TODO: can failing event handler really take down emitting class?
+				//       i.e. Is it necessary to have this try/catch?
 				Message?.Invoke(message);
 			} catch (Exception err) {
 				var vs = new ValueSet();
@@ -111,11 +116,16 @@ namespace UwpNodeBroker {
 		}
 
 		static public async Task Send(ValueSet valueset) {
-			if (isConnected)
-				await connection.SendMessageAsync(valueset);
+			if (!isConnected) return;
+			await connection.SendMessageAsync(valueset);
 		}
 
-		static public void Init() { }
+		static public async Task Send(string message) {
+			if (!isConnected) return;
+			var valueset = new ValueSet();
+			valueset.Add("iipc", message);
+			await connection.SendMessageAsync(valueset);
+		}
 
 	}
 

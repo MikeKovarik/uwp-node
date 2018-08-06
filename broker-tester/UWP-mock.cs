@@ -23,7 +23,15 @@ namespace UwpNodeBroker {
 		static public string appId = "undefined";
 		static public string name = "uwp-node-tester";
 
+		static UWP() {
+			connection = new MockAppServiceConnection();
+		}
+
 		static public async Task Connect() {}
+
+		static public async void Open(object sender = null, EventArgs args = null) {}
+
+		static public async void Close(bool force = false) {}
 
 		static public async Task EmitMessage(ValueSet message) {
 			try {
@@ -36,11 +44,16 @@ namespace UwpNodeBroker {
 		}
 
 		static public async Task Send(ValueSet valueset) {
-			if (isConnected)
-				await connection.SendMessageAsync(valueset);
+			if (!isConnected) return;
+			await connection.SendMessageAsync(valueset);
 		}
 
-		static public void Init() { }
+		static public async Task Send(string message) {
+			if (!isConnected) return;
+			var valueset = new ValueSet();
+			valueset.Add("iipc", message);
+			await connection.SendMessageAsync(valueset);
+		}
 
 	}
 }

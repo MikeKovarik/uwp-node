@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace UwpNodeBroker {
 
-	class NamedPipe {
+	class NamedPipe : IDisposable {
 
 		List<NamedPipeServerStream> Servers = new List<NamedPipeServerStream>();
 		List<NamedPipeServerStream> Clients = new List<NamedPipeServerStream>();
@@ -24,28 +24,28 @@ namespace UwpNodeBroker {
 			get { return Clients.Count > 0; }
 		}
 
-		public bool Disposed = false;
-		public string name;
+		public bool IsDisposed = false;
+		public string Name;
 		public int fd;
-		int chunksize = 665536;
-		int maxInstances = 1;
-		PipeDirection direction = PipeDirection.InOut;
-		PipeTransmissionMode mode = PipeTransmissionMode.Byte;
-		PipeOptions options = PipeOptions.Asynchronous;
+		int MaxInstances = 1;
+		static int ChunkSize = 665536;
+		static PipeDirection Direction = PipeDirection.InOut;
+		static PipeTransmissionMode Mode = PipeTransmissionMode.Byte;
+		static PipeOptions Options = PipeOptions.Asynchronous;
 
 		private TaskQueue queue = new TaskQueue();
 
-		public NamedPipe(string name, int maxInstances = 1) {
+		public NamedPipe(string Name, int MaxInstances = 1) {
 			queue.Enqueue(Ready.Task);
-			this.name = name;
-			this.maxInstances = maxInstances;
+			this.Name = Name;
+			this.MaxInstances = MaxInstances;
 			CreateNewPipe();
 		}
 
 		private void CreateNewPipe() {
 			NamedPipeServerStream pipe = null;
 			try {
-				pipe = new NamedPipeServerStream(name, direction, maxInstances, mode, options, chunksize, chunksize);
+				pipe = new NamedPipeServerStream(Name, Direction, MaxInstances, Mode, Options, ChunkSize, ChunkSize);
 				Servers.Add(pipe);
 				StartListening(pipe);
 			} catch (Exception err) {
@@ -71,7 +71,7 @@ namespace UwpNodeBroker {
 				Connection?.Invoke();
 				Ready.TrySetResult(true);
 				// Start another parallel stream server if needed.
-				if (maxInstances > Servers.Count)
+				if (MaxInstances > Servers.Count)
 					CreateNewPipe();
 				StartReading(pipe);
 			} catch (Exception err) {
@@ -84,13 +84,13 @@ namespace UwpNodeBroker {
 		private Task StartReading(NamedPipeServerStream pipe) => Task.Factory.StartNew(async () => {
 			try {
 				// Server is ready, start reading
-				byte[] buffer = new byte[chunksize];
+				byte[] buffer = new byte[ChunkSize];
 				while (pipe.CanRead) {
 					if (!pipe.IsConnected) {
 						OnDisconnect(pipe);
 						break;
 					}
-					int bytesRead = await pipe.ReadAsync(buffer, 0, chunksize);
+					int bytesRead = await pipe.ReadAsync(buffer, 0, ChunkSize);
 					if (bytesRead == 0) {
 						OnDisconnect(pipe);
 						break;
@@ -108,7 +108,7 @@ namespace UwpNodeBroker {
 
 		private void OnError(NamedPipeServerStream pipe, Exception err, bool isError = true) {
 			if (isError) {
-				Console.WriteLine($"C#: NamedPipe ERROR {name} - {err}");
+				Console.WriteLine($"C#: NamedPipe ERROR {Name} - {err}");
 				Error?.Invoke(err.ToString(), pipe);
 			}
 			OnDisconnect(pipe);
@@ -139,18 +139,26 @@ namespace UwpNodeBroker {
 		}
 
 		public void Dispose() {
-			if (Disposed) return;
-			Disposed = true;
+			if (IsDisposed) return;
+			IsDisposed = true;
 			while (Servers.Count > 0)
 				DisposePipe(Servers[0]);
 			while (Clients.Count > 0)
 				DisposePipe(Clients[0]);
 			End?.Invoke();
-			// Remove references to event handlers.
-			Data = null;
-			Connection = null;
-			End = null;
-			Error = null;
+			// Remove event listeners.
+			if (Data != null)
+				foreach (Action<byte[], NamedPipeServerStream> listener in Data.GetInvocationList())
+					Data -= listener;
+			if (Connection != null)
+				foreach (Action listener in Connection.GetInvocationList())
+					Connection -= listener;
+			if (End != null)
+				foreach (Action listener in End.GetInvocationList())
+					End -= listener;
+			if (Error != null)
+				foreach (Action<string, NamedPipeServerStream> listener in Error.GetInvocationList())
+					Error -= listener;
 		}
 
 		public async Task Write(string message, NamedPipeServerStream exclude = null) {
@@ -159,7 +167,7 @@ namespace UwpNodeBroker {
 		}
 
 		public async Task Write(byte[] buffer, NamedPipeServerStream exclude = null) {
-			if (Disposed) return;
+			if (IsDisposed) return;
 			// NOTE: wrapping in async/await because all Task methods are hot (running)
 			// whereas new Task(...) unlike Task.Run(...) returns cold Task that has to be started
 			// with task.Start() method.
@@ -167,7 +175,7 @@ namespace UwpNodeBroker {
 		}
 
 		private async Task WriteToAllPipes(byte[] buffer, NamedPipeServerStream exclude = null) {
-			if (Disposed) return;
+			if (IsDisposed) return;
 			var tasks = Clients
 				.Where(pipe => pipe.CanWrite && pipe != exclude)
 				.Select(pipe => WriteToPipe(buffer, pipe))
@@ -176,7 +184,7 @@ namespace UwpNodeBroker {
 		}
 
 		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
-			if (Disposed) return;
+			if (IsDisposed) return;
 			await pipe.WriteAsync(buffer, 0, buffer.Length);
 			await pipe.FlushAsync();
 		}

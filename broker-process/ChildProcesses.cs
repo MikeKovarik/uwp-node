@@ -103,17 +103,6 @@ namespace UwpNodeBroker {
 			byte[] buffer = Encoding.UTF8.GetBytes(message + "\n");
 			await iipcPipe.Write(buffer, pipe);
 		}
-		/*
-		// WARNING: untested. TODO test
-		static public async Task Send(byte[] buffer, NamedPipeServerStream pipe) {
-		    await iipcPipe.Write(buffer);
-			byte[] newLineBuffer = Encoding.UTF8.GetBytes("\n");
-		    await iipcPipe.Write(newLineBuffer);
-		}
-*/
-
-		// It's here so we can programatically call static constructor.
-		static public void Init() {}
 
 	}
 
