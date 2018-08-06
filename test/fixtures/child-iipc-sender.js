@@ -1,2 +1,2 @@
 var {broker} = require('../../node.js')
-broker.send('kthxbye')
+broker.emitIipc('other-event', 'bar')

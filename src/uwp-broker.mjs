@@ -109,14 +109,14 @@ if (isUwp || isUwpMock) {
 					throw err
 				}
 			} else if (valueSet.iipc) {
-				super.emit('message', ...parseIipcMessage(valueSet.iipc))
+				super.emit(...parseIipcMessage(valueSet.iipc))
 			} else {
-				super.emit('internalMessage', valueSet)
+				super.emit('message', valueSet)
 			}
 		}
 
-		async send(...args) {
-			await this._internalSend({
+		async emitIipc(...args) {
+			await this.send({
 				iipc: stringifyIipcMessage(...args)
 			})
 		}
@@ -127,8 +127,8 @@ if (isUwp || isUwpMock) {
 		// - Resolves the response (converted from ValueSet to plain JS object).
 		// - Or resolves with undefined if the response is empty
 		// - Or throws if the response contains error ('error' field).
-		async _internalSend(object) {
-			//console.log('_internalSend', object)
+		async send(object) {
+			//console.log('send', object)
 			var req = objectToValueSet(object)
 			try {
 				await this.connection.sendMessageAsync(req)
@@ -147,7 +147,7 @@ if (isUwp || isUwpMock) {
 
 		async kill() {
 			// TODO: figure out internal IPC and make the message do something on the broker's side.
-			await this.send('kill')
+			await this.emitIipc('broker-kill')
 			// NOTE: this closes the broker process but does not care if any child is running under the broker.
 			this._onCanceled()
 		}

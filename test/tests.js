@@ -530,7 +530,7 @@ describe('public IPC', () => {
 })
 
 
-isMock && describe('internal IPC', function() {
+isMock && describe('internal IPC (IIPC)', function() {
 	// used for internal commands between broker and child scripts like
 	// when bg script triggers broker to open UWP app.
 
@@ -539,16 +539,16 @@ isMock && describe('internal IPC', function() {
 		// TODO: future idea: have 'ready' event on ChildProcess that fires once
 		//       the process starts, has pid, and is connected to broker pipe (takes a few millis)
 		await promiseTimeout(200)
-		broker.send('foobar')
+		broker.emitIipc('custom-event', 'foo')
 		var stdout = (await promiseEvent(child.stdout, 'data')).toString().trim()
-		assert.equal(stdout, 'foobar')
+		assert.equal(stdout, 'foo')
 		await promiseEvent(child, 'exit')
 	})
 
 	it(`child process -> broker -> UWP`, async () => {
 		var child = spawn(NODE, ['./fixtures/child-iipc-sender.js'], {stdio: 'inherit'})
-		var cmd = (await promiseEvent(broker, 'message'))
-		assert.equal(cmd, 'kthxbye')
+		var cmd = (await promiseEvent(broker, 'other-event'))
+		assert.equal(cmd, 'bar')
 		await child.kill()
 		await promiseEvent(child, 'exit')
 	})

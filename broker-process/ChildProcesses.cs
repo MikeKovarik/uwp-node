@@ -54,7 +54,7 @@ namespace UwpNodeBroker {
 				if (req.ContainsKey("fd") && req.ContainsKey("data")) {
 					var fd = Convert.ToInt32(req["fd"]);
 					child.Write(req["data"] as byte[], fd);
-				} else if (cmd == "kill") {
+				} else if (cmd == "killProcess") {
 					child.Kill();
 				}
 			}

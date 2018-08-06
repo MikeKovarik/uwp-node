@@ -22,10 +22,10 @@ if (isNode) {
 		ensureDoesntBlockExitting(broker)
 		// Handle incomming Internal-IPC messages, emit them as 'message' on broker.
 		newLineFeedSplitter(broker, line => {
-			broker.emit('message', ...parseIipcMessage(line))
+			broker.emit(...parseIipcMessage(line))
 		})
-		// Enable sending IIPC messages through broker.send()
-		broker.send = (...args) => {
+		// Enable sending IIPC messages through broker.emitIipc()
+		broker.emitIipc = (...args) => {
 			return new Promise((resolve, reject) => {
 				if (!broker.connected)
 					reject(new Error(`not connected to uwp-node-broker`))
@@ -43,7 +43,7 @@ if (isNode) {
 		// There is not broker to connect to but we'll return at leas a dummy EventEmitter
 		// to prevent breaking user's code (during development).
 		broker = new EventEmitter
-		broker.send = () => {}
+		broker.emitIipc = () => {}
 
 	}
 

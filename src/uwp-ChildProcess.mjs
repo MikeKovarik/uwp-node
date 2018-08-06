@@ -102,7 +102,7 @@ export class ChildProcess extends EventEmitter {
 		// but we can only get async errors, so we always need to setup everything.
 		this._setupStdio(options.stdio)
 		// Launch and start receving messages from C# broker.
-		broker.on('internalMessage', this._onMessage)
+		broker.on('message', this._onMessage)
 
 		// Passing the important and custom fields to C#.
 		// UWP ValueSet does not accept arrays, so we have to stringify it.
@@ -111,7 +111,7 @@ export class ChildProcess extends EventEmitter {
 		if (Array.isArray(options.args))
 			options.args = escapeCsharpArguments(options.args)
 
-		broker._internalSend(options)
+		broker.send(options)
 	}
 
 	_onMessage(res) {
@@ -154,9 +154,9 @@ export class ChildProcess extends EventEmitter {
 		//       (if its removed from the list of running processes).
 		//       This may need internal uwp-node IPC system to work before it can be done.
 		try {
-			await broker._internalSend({
+			await broker.send({
 				cid: this.cid,
-				cmd: 'kill', 
+				cmd: 'killProcess', 
 				signal,
 			})
 			this.killed = true
@@ -176,7 +176,7 @@ export class ChildProcess extends EventEmitter {
 		//console.log('################################################################')
 		//console.log('_destroy', this.cid)
 		//console.log('################################################################')
-		broker.removeListener('internalMessage', this._onMessage)
+		broker.removeListener('message', this._onMessage)
 		this.removeListener('close', this._destroy)
 		this.removeListener('error', this._destroy)
 		this._flushStdio()
@@ -328,7 +328,7 @@ export class ChildProcess extends EventEmitter {
 						fd: stream.fd,
 						data: chunk,
 					}
-					broker._internalSend(req).then(cb)
+					broker.send(req).then(cb)
 				}
 			})
 
