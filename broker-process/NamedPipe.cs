@@ -203,6 +203,8 @@ namespace UwpNodeBroker {
 		private bool Running = false;
 
 		public Task Enqueue(Task task) {
+			// TODO: investigate
+			// Once in a hundred runs the line with .Add() throws "Index was outside the bounds of the array" WTF???
 			if (task != null)
 				Queue.Add(task);
 			Run();

@@ -310,8 +310,12 @@ namespace UwpNodeBroker {
 		public void Kill() {
 			//Console.WriteLine("Kill");
 			Killed = true;
-			if (!Proc.HasExited)
-				Proc.Kill();
+			try {
+				if (!Proc.HasExited)
+					Proc.Kill();
+			} catch {
+				Dispose();
+			}
 		}
 
 		// Closes the process, releases all resources & emits Disposed event.
