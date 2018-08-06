@@ -19,16 +19,26 @@ process.on('uncaughtException', err => {
 
 describe('uwp-node UWP mocked in console', function() {
 
+	// sigh. mocha doesn't really respect the promise returned by before()
+	var exitted = false
+	var compiling = false
+
 	before(async () => {
+		compiling = true
 		await compileIfNeeded()
+		compiling = false
 		await Windows.ApplicationModel.FullTrustProcessLauncher.launchFullTrustProcessForCurrentAppAsync()
+		if (exitted)
+			process.exit(0)
 	})
 
 	after(() => {
+		exitted = true
 		// TODO: delete this line once internal IPC (IIPC) works and kill() can work on its own.
 		broker.connection && broker.connection.proc && broker.connection.proc.kill()
 		broker.kill()
-		setTimeout(() => process.exit(0), 1000)
+		if (!compiling)
+			setTimeout(() => process.exit(0), 200)
 	})
 
 	require('./tests.js')
