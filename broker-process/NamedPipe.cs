@@ -177,6 +177,7 @@ namespace UwpNodeBroker {
 		private async Task WriteToAllPipes(byte[] buffer, NamedPipeServerStream exclude = null) {
 			if (IsDisposed) return;
 			var tasks = Clients
+				.ToList() // This is to prevent error "Collection was modified; enumeration operation may not execute"
 				.Where(pipe => pipe.CanWrite && pipe != exclude)
 				.Select(pipe => WriteToPipe(buffer, pipe))
 				.ToList();
@@ -185,8 +186,10 @@ namespace UwpNodeBroker {
 
 		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
 			if (IsDisposed) return;
+			try {
 			await pipe.WriteAsync(buffer, 0, buffer.Length);
 			await pipe.FlushAsync();
+			} catch {}
 		}
 
 	}
@@ -202,28 +205,39 @@ namespace UwpNodeBroker {
 		public Task Enqueue(Task task) {
 			if (task != null)
 				Queue.Add(task);
-			Next();
+			Run();
 			return task;
 		}
 
-		private void Next() {
-			if (!Running && Queue.Count > 0)
-				RunTask(Queue[0]);
-		}
-
-		private async void RunTask(Task task) {
+		private async void Run() {
+			if (Running) return;
 			Running = true;
-			if (task.Status == TaskStatus.Created) {
+			while (Queue.Count != 0) {
+				var task = Queue[0];
+				if (task == null) {
+					Console.WriteLine($"TASK IS NULL {Queue.Count}"); // TODO: remove
+					Queue.RemoveAt(0);
+				} else {
 				// WARNING: Start sometimes throws "Start may not be called on a task that was already started"
 				// despite still having Created (= not yet started) status.
-				try {
-					task.Start();
-				} catch {}
+					if (task.Status == TaskStatus.Created) {
+						try {
+							task.Start();
+							await task;
+						} catch {}
+					}
+					// What the hell is going on here? Somehow the Queue gets shorted while awaiting even though only one Run()
+					// can be running at the time. Plus even Queue.RemoveAt() throws even though it's wrapped in the Queue.Count check.
+					// WHAT THE HELL?
+					try {
+						if (Queue.Count > 0)
+							Queue.RemoveAt(0);
+					} catch (Exception err) {
+						Console.WriteLine($"WTF {err}");
+					}
+				}
 			}
-			await task;
 			Running = false;
-			Queue.Remove(task);
-			Next();
 		}
 
 	}
