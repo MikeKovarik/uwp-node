@@ -1,9 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO.Pipes;
 using System.Text;
-using System.Threading.Tasks;
 using System.Linq;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 
 
 namespace UwpNodeBroker {
@@ -134,7 +136,7 @@ namespace UwpNodeBroker {
 				Clients.Remove(pipe);
 			try {
 				pipe.Disconnect();
-			} catch { }
+			} catch {}
 			pipe.Dispose();
 		}
 
@@ -145,7 +147,11 @@ namespace UwpNodeBroker {
 				DisposePipe(Servers[0]);
 			while (Clients.Count > 0)
 				DisposePipe(Clients[0]);
-			End?.Invoke();
+			if (End != null) {
+				End.Invoke();
+				foreach (Action listener in End.GetInvocationList())
+					End -= listener;
+			}
 			// Remove event listeners.
 			if (Data != null)
 				foreach (Action<byte[], NamedPipeServerStream> listener in Data.GetInvocationList())
@@ -153,9 +159,6 @@ namespace UwpNodeBroker {
 			if (Connection != null)
 				foreach (Action listener in Connection.GetInvocationList())
 					Connection -= listener;
-			if (End != null)
-				foreach (Action listener in End.GetInvocationList())
-					End -= listener;
 			if (Error != null)
 				foreach (Action<string, NamedPipeServerStream> listener in Error.GetInvocationList())
 					Error -= listener;
@@ -171,7 +174,7 @@ namespace UwpNodeBroker {
 			// NOTE: wrapping in async/await because all Task methods are hot (running)
 			// whereas new Task(...) unlike Task.Run(...) returns cold Task that has to be started
 			// with task.Start() method.
-			await queue.Enqueue(new Task(async () => await WriteToAllPipes(buffer, exclude)));
+			await queue.Enqueue(async () => await WriteToAllPipes(buffer, exclude));
 		}
 
 		private async Task WriteToAllPipes(byte[] buffer, NamedPipeServerStream exclude = null) {
@@ -187,8 +190,8 @@ namespace UwpNodeBroker {
 		private async Task WriteToPipe(byte[] buffer, NamedPipeServerStream pipe) {
 			if (IsDisposed) return;
 			try {
-			await pipe.WriteAsync(buffer, 0, buffer.Length);
-			await pipe.FlushAsync();
+				await pipe.WriteAsync(buffer, 0, buffer.Length);
+				await pipe.FlushAsync();
 			} catch {}
 		}
 
@@ -199,14 +202,16 @@ namespace UwpNodeBroker {
 	// Each task will be started when necessary.
 	class TaskQueue {
 
-		private List<Task> Queue = new List<Task>();
+		private readonly ConcurrentQueue<Task> queue = new ConcurrentQueue<Task>();
 		private bool Running = false;
 
+		public Task Enqueue(Action func) {
+			return Enqueue(new Task(func));
+		}
+
 		public Task Enqueue(Task task) {
-			// TODO: investigate
-			// Once in a hundred runs the line with .Add() throws "Index was outside the bounds of the array" WTF???
 			if (task != null)
-				Queue.Add(task);
+				queue.Enqueue(task);
 			Run();
 			return task;
 		}
@@ -214,30 +219,21 @@ namespace UwpNodeBroker {
 		private async void Run() {
 			if (Running) return;
 			Running = true;
-			while (Queue.Count != 0) {
-				var task = Queue[0];
-				if (task == null) {
-					Console.WriteLine($"TASK IS NULL {Queue.Count}"); // TODO: remove
-					Queue.RemoveAt(0);
-				} else {
-				// WARNING: Start sometimes throws "Start may not be called on a task that was already started"
-				// despite still having Created (= not yet started) status.
-					if (task.Status == TaskStatus.Created) {
-						try {
-							task.Start();
-							await task;
-						} catch {}
-					}
-					// What the hell is going on here? Somehow the Queue gets shorted while awaiting even though only one Run()
-					// can be running at the time. Plus even Queue.RemoveAt() throws even though it's wrapped in the Queue.Count check.
-					// WHAT THE HELL?
+			while (!queue.IsEmpty) {
+				if (!queue.TryDequeue(out Task task)) continue;
+				if (task == null) continue;
+				var status = task.Status;
+				if (status == TaskStatus.Created) {
 					try {
-						if (Queue.Count > 0)
-							Queue.RemoveAt(0);
+						task.Start();
 					} catch (Exception err) {
-						Console.WriteLine($"WTF {err}");
+						Console.WriteLine($"TaskQueue error {err}");
 					}
 				}
+				if (status != TaskStatus.Faulted
+				 && status != TaskStatus.RanToCompletion
+				 && status != TaskStatus.Canceled)
+					await task;
 			}
 			Running = false;
 		}
