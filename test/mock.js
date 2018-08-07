@@ -19,6 +19,8 @@ process.on('uncaughtException', err => {
 
 describe('uwp-node UWP mocked in console', function() {
 
+	this.timeout(4000)
+
 	// sigh. mocha doesn't really respect the promise returned by before()
 	var exitted = false
 	var compiling = false

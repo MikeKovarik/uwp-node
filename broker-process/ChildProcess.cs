@@ -328,7 +328,7 @@ namespace UwpNodeBroker {
 			try {
 				Proc.Close();
 				Proc.Dispose();
-			} catch { }
+			} catch {}
 			foreach (NamedPipe pipe in Pipes)
 				pipe?.Dispose();
 			StdioTasks.Clear();
