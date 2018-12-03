@@ -6,7 +6,7 @@ More info and series of blogposts on how to use it is comming soon.
 
 <p align="center">
 	<a href="https://www.instagram.com/p/BiEwg3zj_s-/?taken-by=we.are.mutiny">
-		<img src="https://scontent-vie1-1.cdninstagram.com/vp/0935f4ead8e0e615e088fdb15560eb73/5B9EDCC6/t51.2885-15/s640x640/sh0.08/e35/30890652_170062257041887_1003579766533521408_n.jpg">
+		<img src="https://instagram.fprg1-1.fna.fbcdn.net/vp/690a72c298dcc98c6049008510590e42/5CA42842/t51.2885-15/sh0.08/e35/s640x640/30890652_170062257041887_1003579766533521408_n.jpg">
 	</a>
 </a>
 
